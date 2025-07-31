@@ -506,6 +506,88 @@ impl Display for Fmtp {
     }
 }
 
+/// RTCP port number and address
+///
+/// To be used if not algorithmically derived
+/// from the RTP port described in the media line
+///
+/// See [RFC 3605 Section 2.1](https://datatracker.ietf.org/doc/html/rfc3605#section-2.1)
+#[derive(Debug, Clone, PartialEq)]
+pub struct Rtcp {
+    /// Port used for the media stream
+    pub port: u16,
+    /// Network Type
+    pub nettype: NetType,
+    /// Address type
+    pub addrtype: AddrType,
+    /// IP Address, unicast or multicast
+    pub connection_address: IpAddr,
+}
+
+impl FromStr for Rtcp {
+    type Err = AttributeErr;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut i = s.split(' ');
+        let Some(port) = i.next() else {
+            return Err(AttributeErr(
+                "No values for rtcp attribute, failed to get port number",
+            ));
+        };
+
+        let Ok(port) = port.parse::<u16>() else {
+            return Err(AttributeErr("Failed to parse port in rtcp"));
+        };
+
+        let Some(nettype) = i.next() else {
+            return Err(AttributeErr(
+                "No values for rtcp attribute, failed to get network type",
+            ));
+        };
+
+        let Ok(nettype) = NetType::from_str(nettype) else {
+            return Err(AttributeErr("Failed to parse network type in rtcp"));
+        };
+
+        let Some(addrtype) = i.next() else {
+            return Err(AttributeErr(
+                "No values for rtcp attribute, failed to get address type",
+            ));
+        };
+
+        let Ok(addrtype) = AddrType::from_str(addrtype) else {
+            return Err(AttributeErr("Failed to parse address type in rtcp"));
+        };
+
+        let Some(connection_addr) = i.next() else {
+            return Err(AttributeErr(
+                "No values for rtcp attribute, failed to get connection address",
+            ));
+        };
+
+        let Ok(connection_address) = connection_addr.parse() else {
+            return Err(AttributeErr("Failed to parse connection address in rtcp"));
+        };
+
+        Ok(Self {
+            port,
+            nettype,
+            addrtype,
+            connection_address,
+        })
+    }
+}
+
+impl Display for Rtcp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = format!(
+            "{} {} {} {}",
+            self.port, self.nettype, self.addrtype, self.connection_address
+        );
+        f.write_str(&s)
+    }
+}
+
 /// Originator of the session.
 ///
 /// See [RFC 8866 Section 5.2](https://tools.ietf.org/html/rfc8866#section-5.2) for more details.
@@ -1049,7 +1131,15 @@ a=fingerprint:sha-256 3A:96:6D:57:B2:C2:C7:61:A0:46:3E:1C:97:39:D3:F7:0A:88:A0:B
                 },
                 Attribute {
                     attribute: "rtcp".into(),
-                    value: None,
+                    value: Some(
+                        Rtcp {
+                            port: 53020,
+                            nettype: NetType::In,
+                            addrtype: AddrType::Ip4,
+                            connection_address: IpAddr::V4(std::net::Ipv4Addr::new(126, 16, 64, 4)),
+                        }
+                        .to_string(),
+                    ),
                 },
             ],
         };
@@ -1062,7 +1152,10 @@ a=fingerprint:sha-256 3A:96:6D:57:B2:C2:C7:61:A0:46:3E:1C:97:39:D3:F7:0A:88:A0:B
             media.get_first_attribute_value("rtpmap"),
             Ok(Some("99 h263-1998/90000"))
         );
-        assert_eq!(media.get_first_attribute_value("rtcp"), Ok(None));
+        assert_eq!(
+            media.get_first_attribute_value("rtcp"),
+            Ok(Some("53020 IN IP4 126.16.64.4"))
+        );
         assert_eq!(
             media.get_first_attribute_value("foo"),
             Err(AttributeNotFoundError)
@@ -1099,13 +1192,12 @@ a=fingerprint:sha-256 3A:96:6D:57:B2:C2:C7:61:A0:46:3E:1C:97:39:D3:F7:0A:88:A0:B
             ))
         );
 
-        assert_eq!(
-            media
-                .get_attribute_values("rtcp")
-                .unwrap()
-                .collect::<Vec<_>>(),
-            &[None]
-        );
+        let r = media
+            .get_attribute_values_typed("rtcp")
+            .collect::<Vec<Result<Rtcp, AttributeErr>>>();
+        assert_eq!(r[0].as_ref().unwrap().addrtype, AddrType::Ip4);
+        assert_eq!(r[0].as_ref().unwrap().port, 53020);
+
         assert!(media.get_attribute_values("foo").is_err());
     }
 
