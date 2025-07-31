@@ -437,6 +437,75 @@ impl Display for RtpMap {
     }
 }
 
+/// Format specific parameters
+#[derive(Debug, Clone, PartialEq)]
+pub struct FmtpParam {
+    param: String,
+    val: Option<String>,
+}
+
+/// Format Parameters
+///
+/// See [RFC 8866 Section 6.15](https://datatracker.ietf.org/doc/html/rfc8866#section-6.15) for more details
+#[derive(Debug, Clone, PartialEq)]
+pub struct Fmtp {
+    /// Payload format
+    pub fmt: u8,
+    /// Format specific parameters
+    // Multiple params are expected to be semicolon separated
+    // Each param can be a 'key=value' pair or just single parameter
+    pub format_specific_params: Vec<FmtpParam>,
+}
+
+impl FromStr for Fmtp {
+    type Err = AttributeErr;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let Some((fmt, rest)) = s.split_once(' ') else {
+            return Err(AttributeErr("Failed to split the format using a space"));
+        };
+
+        let Ok(fmt) = fmt.parse::<u8>() else {
+            return Err(AttributeErr("Failed to parse format in fmtp"));
+        };
+
+        let mut params: Vec<FmtpParam> = Vec::new();
+        for param in rest.split(';') {
+            if let Some((key, value)) = param.split_once('=') {
+                params.push(FmtpParam {
+                    param: key.to_string(),
+                    val: Some(value.to_string()),
+                });
+            } else {
+                params.push(FmtpParam {
+                    param: param.to_string(),
+                    val: None,
+                });
+            }
+        }
+
+        Ok(Self {
+            fmt,
+            format_specific_params: params,
+        })
+    }
+}
+
+impl Display for Fmtp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut s = format!("{} ", self.fmt);
+        for p in &self.format_specific_params {
+            s += p.param.as_str();
+            if let Some(val) = &p.val {
+                s += format!("={val}").as_str();
+            }
+            s += ";";
+        }
+        let s = s.trim_end_matches(';').to_string();
+        f.write_str(&s)
+    }
+}
+
 /// Originator of the session.
 ///
 /// See [RFC 8866 Section 5.2](https://tools.ietf.org/html/rfc8866#section-5.2) for more details.
@@ -888,6 +957,7 @@ z=2882844526 -1h 2898848070 0\r
 k=clear:1234\r
 a=recvonly\r
 m=audio 49170 RTP/AVP 0\r
+a=fmtp:0 0-15\r
 m=video 51372/2 RTP/AVP 99 97 98\r
 a=rtpmap:99 h263-1998/90000\r
 a=fingerprint:sha-256 3A:96:6D:57:B2:C2:C7:61:A0:46:3E:1C:97:39:D3:F7:0A:88:A0:B1:EC:03:FB:10:A5:5D:3A:37:AB:DD:02:AA\r
@@ -906,6 +976,14 @@ a=fingerprint:sha-256 3A:96:6D:57:B2:C2:C7:61:A0:46:3E:1C:97:39:D3:F7:0A:88:A0:B
         assert_ne!(
             parsed.medias[1].try_parse_transport_proto(),
             Ok(TransportProto::RtpSavpf)
+        );
+        let f = parsed.medias[0]
+            .get_attribute_values_typed("fmtp")
+            .collect::<Vec<Result<Fmtp, AttributeErr>>>();
+        assert_eq!(f.len(), 1);
+        assert_eq!(
+            f[0].as_ref().unwrap().format_specific_params[0].param,
+            "0-15"
         );
     }
 
@@ -942,6 +1020,29 @@ a=fingerprint:sha-256 3A:96:6D:57:B2:C2:C7:61:A0:46:3E:1C:97:39:D3:F7:0A:88:A0:B
                             encoding_name: "L16".into(),
                             clock_rate: 16000,
                             encoding_params: Some("2".into()),
+                        }
+                        .to_string(),
+                    ),
+                },
+                Attribute {
+                    attribute: "fmtp".into(),
+                    value: Some(
+                        Fmtp {
+                            fmt: 100,
+                            format_specific_params: Vec::from([
+                                FmtpParam {
+                                    param: "profile-level-id".to_string(),
+                                    val: Some("42e016".to_string()),
+                                },
+                                FmtpParam {
+                                    param: "max-mbps".to_string(),
+                                    val: Some("108000".to_string()),
+                                },
+                                FmtpParam {
+                                    param: "max-fs".to_string(),
+                                    val: Some("3600".to_string()),
+                                },
+                            ]),
                         }
                         .to_string(),
                     ),
@@ -986,7 +1087,17 @@ a=fingerprint:sha-256 3A:96:6D:57:B2:C2:C7:61:A0:46:3E:1C:97:39:D3:F7:0A:88:A0:B
         assert_eq!(v[0].as_ref().unwrap().clock_rate, 90000);
         assert_eq!(v[1].as_ref().unwrap().encoding_name, "h264");
         assert_eq!(v[2], Err(AttributeErr("No value for the attribute")));
-        assert_eq!(v[3].as_ref().unwrap().encoding_params.as_ref().unwrap(), "2");
+        assert_eq!(
+            v[3].as_ref().unwrap().encoding_params.as_ref().unwrap(),
+            "2"
+        );
+
+        assert_eq!(
+            media.get_first_attribute_value("fmtp"),
+            Ok(Some(
+                "100 profile-level-id=42e016;max-mbps=108000;max-fs=3600"
+            ))
+        );
 
         assert_eq!(
             media
