@@ -366,6 +366,11 @@ impl Display for TransportProto {
     }
 }
 
+/// Trait for Typed Attribute structs
+pub trait TypedAttribute: Display + FromStr<Err = AttributeErr> {
+    const NAME: &'static str;
+}
+
 /// RtpMap Attribute
 ///
 /// See [RFC 8866 Section 6.6](https://datatracker.ietf.org/doc/html/rfc8866#section-6.6) for more details
@@ -437,6 +442,10 @@ impl Display for RtpMap {
     }
 }
 
+impl TypedAttribute for RtpMap {
+    const NAME: &'static str = "rtpmap";
+}
+
 /// Format specific parameters
 #[derive(Debug, Clone, PartialEq)]
 pub struct FmtpParam {
@@ -504,6 +513,10 @@ impl Display for Fmtp {
         let s = s.trim_end_matches(';').to_string();
         f.write_str(&s)
     }
+}
+
+impl TypedAttribute for Fmtp {
+    const NAME: &'static str = "fmtp";
 }
 
 /// RTCP port number and address
@@ -586,6 +599,10 @@ impl Display for Rtcp {
         );
         f.write_str(&s)
     }
+}
+
+impl TypedAttribute for Rtcp {
+    const NAME: &'static str = "rtcp";
 }
 
 /// Originator of the session.
@@ -972,48 +989,42 @@ impl Media {
     }
 
     /// Gets an iterator over all attribute values of the given name.
-    /// Each item is a `Result` with the inferred type in `Ok` and `AttributeError` in `Err`
-    pub fn get_attribute_values_typed<'a, T: FromStr<Err = AttributeErr>>(
+    /// Each item is a `Result` with the inferred type in `Ok` and `AttributeErr` in `Err`
+    /// The iterator does not terminate upon an error item; continues with the next attribute
+    pub fn attributes_typed<'a, T: TypedAttribute>(
         &'a self,
-        name: &'a str,
     ) -> impl Iterator<Item = Result<T, AttributeErr>> + 'a {
         self.attributes
             .iter()
-            .filter(move |a| a.attribute == name)
+            .filter(move |a| a.attribute.eq_ignore_ascii_case(T::NAME))
             .map(|a| {
                 let Some(s) = &a.value else {
                     // does not have a value for the attribute
                     return Err(AttributeErr("No value for the attribute"));
                 };
 
-                match T::from_str(s) {
-                    Ok(t) => Ok(t),
-                    Err(e) => Err(e),
-                }
+                T::from_str(s)
             })
     }
 }
 
 impl Session {
     /// Gets an iterator over all attribute values of the given name.
-    /// Each item is a `Result` with the inferred type in `Ok` and `AttributeError` in `Err`
-    pub fn get_attribute_values_typed<'a, T: FromStr<Err = AttributeErr>>(
+    /// Each item is a `Result` with the inferred type in `Ok` and `AttributeErr` in `Err`
+    /// The iterator does not terminate upon an error item; continues with the next attribute
+    pub fn attributes_typed<'a, T: TypedAttribute>(
         &'a self,
-        name: &'a str,
     ) -> impl Iterator<Item = Result<T, AttributeErr>> + 'a {
         self.attributes
             .iter()
-            .filter(move |a| a.attribute == name)
+            .filter(move |a| a.attribute.eq_ignore_ascii_case(T::NAME))
             .map(|a| {
                 let Some(s) = &a.value else {
                     // does not have a value for the attribute
                     return Err(AttributeErr("No value for the attribute"));
                 };
 
-                match T::from_str(s) {
-                    Ok(t) => Ok(t),
-                    Err(e) => Err(e),
-                }
+                T::from_str(s)
             })
     }
 }
@@ -1059,12 +1070,12 @@ a=fingerprint:sha-256 3A:96:6D:57:B2:C2:C7:61:A0:46:3E:1C:97:39:D3:F7:0A:88:A0:B
             parsed.medias[1].try_parse_transport_proto(),
             Ok(TransportProto::RtpSavpf)
         );
-        let f = parsed.medias[0]
-            .get_attribute_values_typed("fmtp")
-            .collect::<Vec<Result<Fmtp, AttributeErr>>>();
+        let f = fallible_iterator::convert(parsed.medias[0].attributes_typed::<Fmtp>())
+            .collect::<Vec<_>>()
+            .expect("Valid vector of attributes");
         assert_eq!(f.len(), 1);
         assert_eq!(
-            f[0].as_ref().unwrap().format_specific_params[0].param,
+            f[0].clone().format_specific_params[0].param,
             "0-15"
         );
     }
@@ -1175,7 +1186,7 @@ a=fingerprint:sha-256 3A:96:6D:57:B2:C2:C7:61:A0:46:3E:1C:97:39:D3:F7:0A:88:A0:B
         );
 
         let v = media
-            .get_attribute_values_typed("rtpmap")
+            .attributes_typed::<RtpMap>()
             .collect::<Vec<Result<RtpMap, AttributeErr>>>();
         assert_eq!(v[0].as_ref().unwrap().clock_rate, 90000);
         assert_eq!(v[1].as_ref().unwrap().encoding_name, "h264");
@@ -1185,6 +1196,16 @@ a=fingerprint:sha-256 3A:96:6D:57:B2:C2:C7:61:A0:46:3E:1C:97:39:D3:F7:0A:88:A0:B
             "2"
         );
 
+        let v = media
+            .attributes_typed::<RtpMap>()
+            .filter(|attr| {
+                let Ok(at) = attr else { return false };
+                at.payload_type == 99
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].as_ref().unwrap().encoding_name, "h263-1998");
+
         assert_eq!(
             media.get_first_attribute_value("fmtp"),
             Ok(Some(
@@ -1192,9 +1213,7 @@ a=fingerprint:sha-256 3A:96:6D:57:B2:C2:C7:61:A0:46:3E:1C:97:39:D3:F7:0A:88:A0:B
             ))
         );
 
-        let r = media
-            .get_attribute_values_typed("rtcp")
-            .collect::<Vec<Result<Rtcp, AttributeErr>>>();
+        let r = media.attributes_typed::<Rtcp>().collect::<Vec<_>>();
         assert_eq!(r[0].as_ref().unwrap().addrtype, AddrType::Ip4);
         assert_eq!(r[0].as_ref().unwrap().port, 53020);
 
@@ -1236,6 +1255,18 @@ a=fingerprint:sha-256 3A:96:6D:57:B2:C2:C7:61:A0:46:3E:1C:97:39:D3:F7:0A:88:A0:B
                     value: Some("100 h264/90000".into()),
                 },
                 Attribute {
+                    attribute: "rtpmap".into(),
+                    value: Some(
+                        RtpMap {
+                            payload_type: 101,
+                            encoding_name: "L16".into(),
+                            clock_rate: 16000,
+                            encoding_params: Some("2".into()),
+                        }
+                        .to_string(),
+                    ),
+                },
+                Attribute {
                     attribute: "rtcp".into(),
                     value: None,
                 },
@@ -1274,7 +1305,11 @@ a=fingerprint:sha-256 3A:96:6D:57:B2:C2:C7:61:A0:46:3E:1C:97:39:D3:F7:0A:88:A0:B
                 .get_attribute_values("rtpmap")
                 .unwrap()
                 .collect::<Vec<_>>(),
-            &[Some("99 h263-1998/90000"), Some("100 h264/90000")]
+            &[
+                Some("99 h263-1998/90000"),
+                Some("100 h264/90000"),
+                Some("101 L16/16000/2")
+            ]
         );
         assert_eq!(
             session
@@ -1284,5 +1319,11 @@ a=fingerprint:sha-256 3A:96:6D:57:B2:C2:C7:61:A0:46:3E:1C:97:39:D3:F7:0A:88:A0:B
             &[None]
         );
         assert!(session.get_attribute_values("foo").is_err());
+
+        let a = fallible_iterator::convert(session.attributes_typed::<RtpMap>())
+            .collect::<Vec<_>>()
+            .expect("Valid vector of attributes");
+        assert_eq!(a[2].encoding_name, "L16");
+        assert_eq!(a[0].payload_type, 99);
     }
 }
