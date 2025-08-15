@@ -31,6 +31,10 @@
 //!     Ok(None) => println!("tool: empty"),
 //!     Err(_) => println!("no tool attribute"),
 //! }
+//!
+//! // Access all the 'rtpmap' attributes as a `RtpMap` type
+//! // returns an iterator of type `Iterator<Item = Result<RtpMap, AttributeErr>>`
+//! let r = sdp.attributes_typed::<sdp_types::RtpMap>();
 //! ```
 //!
 //! ## Limitations
