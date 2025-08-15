@@ -844,6 +844,51 @@ impl Media {
             Err(AttributeNotFoundError)
         }
     }
+
+    /// Tries to parse the `media` `String` of `self` as `MediaType`
+    pub fn try_parse_mediatype(&self) -> Result<MediaType, ParseEnumError> {
+        MediaType::from_str(self.media.as_str())
+    }
+
+    /// Sets the `media` `String` of `self` from the specified `MediaType`
+    pub fn set_from_mediatype(&mut self, media: MediaType) {
+        self.media = media.to_string();
+    }
+
+    /// Tries to parse the `proto` `String` of `self` as `TransportProto`
+    pub fn try_parse_transport_proto(&self) -> Result<TransportProto, ParseEnumError> {
+        TransportProto::from_str(self.proto.as_str())
+    }
+
+    /// Sets the `proto` `String` of `self` from the specified `TransportProto`
+    pub fn set_from_transport_proto(&mut self, proto: TransportProto) {
+        self.proto = proto.to_string();
+    }
+    /// Constructs a `MediaType` from a string
+    pub fn try_mediatype(&self) -> Result<MediaType, ParseEnumError> {
+        MediaType::from_str(self.media.as_str())
+    }
+
+    /// Gets an iterator over all attribute values of the given name.
+    ///
+    /// Each item is a `Result` with the inferred type in `Ok` and `AttributeErr` in `Err`.
+    ///
+    /// The iterator does not terminate upon an error item; continues with the next attribute
+    pub fn attributes_typed<'a, T: TypedAttribute>(
+        &'a self,
+    ) -> impl Iterator<Item = Result<T, AttributeErr>> + 'a {
+        self.attributes
+            .iter()
+            .filter(move |a| a.attribute.eq_ignore_ascii_case(T::NAME))
+            .map(|a| {
+                let Some(s) = &a.value else {
+                    // does not have a value for the attribute
+                    return Err(AttributeErr("No value for the attribute"));
+                };
+
+                T::from_str(s)
+            })
+    }
 }
 
 impl Session {
@@ -880,6 +925,27 @@ impl Session {
         } else {
             Err(AttributeNotFoundError)
         }
+    }
+
+    /// Gets an iterator over all attribute values of the given name.
+    ///
+    /// Each item is a `Result` with the inferred type in `Ok` and `AttributeErr` in `Err`.
+    ///
+    /// The iterator does not terminate upon an error item; continues with the next attribute
+    pub fn attributes_typed<'a, T: TypedAttribute>(
+        &'a self,
+    ) -> impl Iterator<Item = Result<T, AttributeErr>> + 'a {
+        self.attributes
+            .iter()
+            .filter(move |a| a.attribute.eq_ignore_ascii_case(T::NAME))
+            .map(|a| {
+                let Some(s) = &a.value else {
+                    // does not have a value for the attribute
+                    return Err(AttributeErr("No value for the attribute"));
+                };
+
+                T::from_str(s)
+            })
     }
 }
 
@@ -968,68 +1034,6 @@ impl Key {
     /// Sets the `method` `String` of `self` from the specified `KeyMethod`
     pub fn set_from_keymethod(&mut self, method: KeyMethod) {
         self.method = method.to_string();
-    }
-}
-
-impl Media {
-    /// Tries to parse the `media` `String` of `self` as `MediaType`
-    pub fn try_parse_mediatype(&self) -> Result<MediaType, ParseEnumError> {
-        MediaType::from_str(self.media.as_str())
-    }
-
-    /// Sets the `media` `String` of `self` from the specified `MediaType`
-    pub fn set_from_mediatype(&mut self, media: MediaType) {
-        self.media = media.to_string();
-    }
-
-    /// Tries to parse the `proto` `String` of `self` as `TransportProto`
-    pub fn try_parse_transport_proto(&self) -> Result<TransportProto, ParseEnumError> {
-        TransportProto::from_str(self.proto.as_str())
-    }
-
-    /// Sets the `proto` `String` of `self` from the specified `TransportProto`
-    pub fn set_from_transport_proto(&mut self, proto: TransportProto) {
-        self.proto = proto.to_string();
-    }
-
-    /// Gets an iterator over all attribute values of the given name.
-    /// Each item is a `Result` with the inferred type in `Ok` and `AttributeErr` in `Err`
-    /// The iterator does not terminate upon an error item; continues with the next attribute
-    pub fn attributes_typed<'a, T: TypedAttribute>(
-        &'a self,
-    ) -> impl Iterator<Item = Result<T, AttributeErr>> + 'a {
-        self.attributes
-            .iter()
-            .filter(move |a| a.attribute.eq_ignore_ascii_case(T::NAME))
-            .map(|a| {
-                let Some(s) = &a.value else {
-                    // does not have a value for the attribute
-                    return Err(AttributeErr("No value for the attribute"));
-                };
-
-                T::from_str(s)
-            })
-    }
-}
-
-impl Session {
-    /// Gets an iterator over all attribute values of the given name.
-    /// Each item is a `Result` with the inferred type in `Ok` and `AttributeErr` in `Err`
-    /// The iterator does not terminate upon an error item; continues with the next attribute
-    pub fn attributes_typed<'a, T: TypedAttribute>(
-        &'a self,
-    ) -> impl Iterator<Item = Result<T, AttributeErr>> + 'a {
-        self.attributes
-            .iter()
-            .filter(move |a| a.attribute.eq_ignore_ascii_case(T::NAME))
-            .map(|a| {
-                let Some(s) = &a.value else {
-                    // does not have a value for the attribute
-                    return Err(AttributeErr("No value for the attribute"));
-                };
-
-                T::from_str(s)
-            })
     }
 }
 
