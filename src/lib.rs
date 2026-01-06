@@ -609,6 +609,308 @@ impl TypedAttribute for Rtcp {
     const NAME: &'static str = "rtcp";
 }
 
+/// RTCP Positive feedback values
+///
+/// See [RFC 4585 Section 4.2](https://datatracker.ietf.org/doc/html/rfc4585#section-4.2)
+#[derive(Debug, PartialEq, Clone)]
+pub enum RtcpFbAck {
+    /// Reference Picture Selection Indication
+    Rpsi,
+    /// Application layer feedback
+    App(Option<String>),
+    /// Congestion Control Feedback
+    ///
+    /// See [RFC 8888 Section 6](https://datatracker.ietf.org/doc/html/rfc8888#section-6)
+    Ccfb,
+    /// Other Ack types
+    Other(String),
+}
+
+/// RTCP Negative feedback values
+///
+/// See [RFC 4585 Section 4.2](https://datatracker.ietf.org/doc/html/rfc4585#section-4.2)
+#[derive(Debug, PartialEq, Clone)]
+pub enum RtcpFbNack {
+    /// Picture Loss Indication
+    Pli,
+    /// Slice Loss Indication
+    Sli,
+    /// Reference Picture Selection Indication
+    Rpsi,
+    /// Application layer feedback
+    App(Option<String>),
+    /// Explicit Congestion Notification
+    ///
+    /// See [RFC 6679 Section 6.2](https://datatracker.ietf.org/doc/html/rfc6679#section-6.2)
+    Ecn,
+    /// Other Nack types
+    Other(String),
+}
+
+/// Codec Control using RTCP feedback messages
+///
+/// See [RFC 5104 Section 7.1](https://datatracker.ietf.org/doc/html/rfc5104#section-7.1)
+#[derive(Debug, PartialEq, Clone)]
+pub enum RtcpFbCcm {
+    /// Full Intra Request
+    Fir,
+    /// Temporary Maximum Media Stream Bit Rate
+    Tmmbr(Option<String>),
+    /// Temporal-Spatial Trade-off
+    Tstr,
+    /// Video Back Channel Messages
+    Vbcm(Vec<u8>),
+    /// Other messages (for future commands/Indications)
+    Other(String),
+}
+
+#[derive(Debug, PartialEq, Clone)]
+/// Types of RTCP feedback values
+pub enum RtcpFbVal {
+    /// Positive Acknowledgement
+    Ack(Option<RtcpFbAck>),
+    /// Negative Acknowledgement
+    Nack(Option<RtcpFbNack>),
+    /// Minimum interval between two Regular RTCP packets in milliseconds
+    TrrInt(u64),
+    /// Codec Control messages
+    Ccm(RtcpFbCcm),
+    /// Others Rtcp Fb types
+    Other(String),
+}
+
+/// Payload format for which feedback messages may be used,
+#[derive(Debug, PartialEq, Clone)]
+pub enum RtcpFbPt {
+    /// Fixed payload format
+    Fmt(u8),
+    /// Applies to all formats
+    Wildcard,
+}
+
+/// RTCP Feedback Capability
+///
+/// See [RFC 4585 Section 4.2](https://datatracker.ietf.org/doc/html/rfc4585#section-4.2)
+pub struct RtcpFb {
+    /// Payload format for which feedback messages may be used,
+    pub pt: RtcpFbPt,
+    /// RTCP Feedback value
+    pub val: RtcpFbVal,
+}
+
+impl FromStr for RtcpFb {
+    type Err = AttributeErr;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut i = s.split(' ');
+        let Some(pt) = i.next() else {
+            return Err(AttributeErr(
+                "Failed to parse the RtcpFb, no payload format",
+            ));
+        };
+
+        let pt = if let Ok(pt) = pt.parse::<u8>() {
+            RtcpFbPt::Fmt(pt)
+        } else if pt == "*" {
+            RtcpFbPt::Wildcard
+        } else {
+            return Err(AttributeErr(
+                "Failed to parse the RtcpFb, invalid values in the payload format",
+            ));
+        };
+
+        let Some(val) = i.next() else {
+            return Err(AttributeErr("Failed to parse the RtcpFb, no Rtcp value"));
+        };
+
+        let rtcp_fb_val = match val {
+            "ack" => {
+                if let Some(ack_val) = i.next() {
+                    let ack_val = match ack_val {
+                        "rpsi" => RtcpFbAck::Rpsi,
+                        "app" => {
+                            if let Some(app_param) = i.next() {
+                                RtcpFbAck::App(Some(app_param.to_string()))
+                            } else {
+                                RtcpFbAck::App(None)
+                            }
+                        }
+                        "ccfb" => {
+                            // The payload type used with "ccfb" feedback MUST be the wildcard type
+                            // See https://datatracker.ietf.org/doc/html/rfc8888#section-6
+                            if let RtcpFbPt::Fmt(_) = pt {
+                                return Err(AttributeErr("The payload type used with \"ccfb\" feedback is not wildcard type '*'"));
+                            } else {
+                                RtcpFbAck::Ccfb
+                            }
+                        }
+                        other => RtcpFbAck::Other(other.to_string()),
+                    };
+                    RtcpFbVal::Ack(Some(ack_val))
+                } else {
+                    RtcpFbVal::Ack(None)
+                }
+            }
+            "nack" => {
+                if let Some(nack_val) = i.next() {
+                    let nack_val = match nack_val {
+                        "pli" => RtcpFbNack::Pli,
+                        "sli" => RtcpFbNack::Sli,
+                        "rpsi" => RtcpFbNack::Rpsi,
+                        "app" => {
+                            if let Some(app_param) = i.next() {
+                                RtcpFbNack::App(Some(app_param.to_string()))
+                            } else {
+                                RtcpFbNack::App(None)
+                            }
+                        }
+                        "ecn" => RtcpFbNack::Ecn,
+                        other => RtcpFbNack::Other(other.to_string()),
+                    };
+                    RtcpFbVal::Nack(Some(nack_val))
+                } else {
+                    RtcpFbVal::Nack(None)
+                }
+            }
+            "trr-int" => {
+                if let Some(val) = i.next() {
+                    let Ok(i) = val.parse::<u64>() else {
+                        return Err(AttributeErr("Failed to parse trr-int value"));
+                    };
+                    RtcpFbVal::TrrInt(i)
+                } else {
+                    return Err(AttributeErr("The trr-int has no value"));
+                }
+            }
+            "ccm" => {
+                if let Some(ccm_val) = i.next() {
+                    let ccm_val = match ccm_val {
+                        "fir" => RtcpFbCcm::Fir,
+                        "tmmbr" => {
+                            if let Some(tmmbr_val) = i.next() {
+                                RtcpFbCcm::Tmmbr(Some(tmmbr_val.to_string()))
+                            } else {
+                                RtcpFbCcm::Tmmbr(None)
+                            }
+                        }
+                        "tstr" => RtcpFbCcm::Tstr,
+                        "vbcm" => {
+                            let mut v = vec![];
+                            for vbcm_val in i {
+                                let Ok(p) = vbcm_val.parse::<u8>() else {
+                                    return Err(AttributeErr("Failed to parse vbcm value"));
+                                };
+                                v.push(p);
+                            }
+                            RtcpFbCcm::Vbcm(v)
+                        }
+                        other => RtcpFbCcm::Other(other.to_string()),
+                    };
+                    RtcpFbVal::Ccm(ccm_val)
+                } else {
+                    return Err(AttributeErr("Ccm param not available "));
+                }
+            }
+            other => RtcpFbVal::Other(other.to_string()),
+        };
+
+        Ok(Self {
+            pt,
+            val: rtcp_fb_val,
+        })
+    }
+}
+
+impl Display for RtcpFbVal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let fb_val = match self {
+            RtcpFbVal::Ack(ack) => {
+                let mut s = "ack".to_string();
+                if let Some(ack) = ack {
+                    match ack {
+                        RtcpFbAck::Rpsi => s += " rpsi",
+                        RtcpFbAck::Ccfb => s += " ccfb",
+                        RtcpFbAck::App(app) => {
+                            s += " app";
+                            if let Some(app_param) = app {
+                                s += format!(" {}", app_param).as_str();
+                            }
+                        }
+                        RtcpFbAck::Other(other) => {
+                            s += format!(" {}", other).as_str();
+                        }
+                    }
+                }
+                s
+            }
+            RtcpFbVal::Nack(nack) => {
+                let mut s = "nack".to_string();
+                if let Some(nack) = nack {
+                    match nack {
+                        RtcpFbNack::Pli => s += " pli",
+                        RtcpFbNack::Sli => s += " sli",
+                        RtcpFbNack::Rpsi => s += " rpsi",
+                        RtcpFbNack::Ecn => s += " ecn",
+                        RtcpFbNack::App(app) => {
+                            s += " app";
+                            if let Some(app_param) = app {
+                                s += format!(" {}", app_param).as_str();
+                            }
+                        }
+                        RtcpFbNack::Other(other) => {
+                            s += format!(" {}", other).as_str();
+                        }
+                    }
+                }
+                s
+            }
+            RtcpFbVal::TrrInt(trr_int) => {
+                format!("trr-int {}", trr_int)
+            }
+            RtcpFbVal::Ccm(ccm) => {
+                let mut s = "ccm".to_string();
+                match ccm {
+                    RtcpFbCcm::Fir => s += " fir",
+                    RtcpFbCcm::Tstr => s += " tstr",
+                    RtcpFbCcm::Tmmbr(smaxpr) => {
+                        s += " tmmbr";
+                        if let Some(smaxpr) = smaxpr {
+                            s += format!(" {}", smaxpr).as_str();
+                        }
+                    }
+                    RtcpFbCcm::Vbcm(vbcm) => {
+                        s += " vbcm";
+                        vbcm.iter().for_each(|v| {
+                            s += format!(" {}", v).as_str();
+                        });
+                    }
+                    RtcpFbCcm::Other(other) => {
+                        s += format!(" {}", other).as_str();
+                    }
+                }
+                s
+            }
+            RtcpFbVal::Other(other) => other.clone(),
+        };
+
+        f.write_str(&fb_val)
+    }
+}
+
+impl Display for RtcpFb {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.pt {
+            RtcpFbPt::Wildcard => write!(f, "* ")?,
+            RtcpFbPt::Fmt(pt) => write!(f, "{pt} ")?,
+        }
+        write!(f, "{}", self.val)
+    }
+}
+
+impl TypedAttribute for RtcpFb {
+    const NAME: &'static str = "rtcp-fb";
+}
+
 /// Originator of the session.
 ///
 /// See [RFC 8866 Section 5.2](https://tools.ietf.org/html/rfc8866#section-5.2) for more details.
@@ -1333,5 +1635,42 @@ a=fingerprint:sha-256 3A:96:6D:57:B2:C2:C7:61:A0:46:3E:1C:97:39:D3:F7:0A:88:A0:B
             .expect("Valid vector of attributes");
         assert_eq!(a[2].encoding_name, "L16");
         assert_eq!(a[0].payload_type, 99);
+    }
+
+    #[test]
+    fn parse_rtcp_fb() {
+        let sdp = "v=0\r
+o=alice 3203093520 3203093520 IN IP4 host.example.com\r
+s=Multicast video with feedback\r
+t=3203130148 3203137348\r
+m=audio 49170 RTP/AVP 0\r
+c=IN IP4 224.2.1.183\r
+a=rtpmap:0 PCMU/8000\r
+m=video 51372 RTP/AVPF 98 99\r
+c=IN IP4 224.2.1.184\r
+a=rtpmap:98 H263-1998/90000\r
+a=rtpmap:99 H261/90000\r
+a=rtcp-fb:* nack\r
+a=rtcp-fb:98 nack rpsi\r
+a=rtcp-fb:* trr-int 1000\r
+a=rtcp-fb:98 ccm vbcm 1 2\r
+a=rtcp-fb:* ccm tmmbr smaxpr=120\r
+";
+
+        let parsed = Session::parse(sdp.as_bytes()).unwrap();
+        let mut written = vec![];
+        parsed.write(&mut written).unwrap();
+
+        let v = fallible_iterator::convert(parsed.medias[1].attributes_typed::<RtcpFb>())
+            .collect::<Vec<_>>()
+            .expect("Valid vector of attributes");
+        assert_eq!(v[0].pt, RtcpFbPt::Wildcard);
+        assert_eq!(v[1].val, RtcpFbVal::Nack(Some(RtcpFbNack::Rpsi)));
+        assert_eq!(v[2].val, RtcpFbVal::TrrInt(1000));
+        assert_eq!(v[3].val, RtcpFbVal::Ccm(RtcpFbCcm::Vbcm(vec![1, 2])));
+        assert_eq!(
+            v[4].val,
+            RtcpFbVal::Ccm(RtcpFbCcm::Tmmbr(Some("smaxpr=120".to_string())))
+        );
     }
 }
