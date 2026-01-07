@@ -911,6 +911,133 @@ impl TypedAttribute for RtcpFb {
     const NAME: &'static str = "rtcp-fb";
 }
 
+/// Media Direction Attributes
+///
+/// See [RFC 8866 Section 6.7](https://www.rfc-editor.org/rfc/rfc8866.html#section-6.7)
+#[derive(Debug, Clone, PartialEq)]
+pub enum Direction {
+    SendOnly,
+    RecvOnly,
+    SendRecv,
+    Inactive,
+}
+
+impl Direction {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::SendOnly => "sendonly",
+            Self::RecvOnly => "recvonly",
+            Self::SendRecv => "sendrecv",
+            Self::Inactive => "inactive",
+        }
+    }
+}
+
+impl FromStr for Direction {
+    type Err = ParseEnumError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_ascii_lowercase().as_str() {
+            "sendonly" => Ok(Direction::SendOnly),
+            "recvonly" => Ok(Direction::RecvOnly),
+            "sendrecv" => Ok(Direction::SendRecv),
+            "inactive" => Ok(Direction::Inactive),
+            _ => Err(ParseEnumError::Invalid(s.to_string())),
+        }
+    }
+}
+
+impl Display for Direction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+/// RTP header extensions map
+///
+/// See [RFC 8285 Section 8](https://datatracker.ietf.org/doc/html/rfc8285#section-8)
+pub struct ExtMap {
+    /// The local identifier (ID) of this extension
+    pub id: u8,
+    /// Direction
+    pub direction: Option<Direction>,
+    /// The format and meaning of the extension
+    pub uri: String,
+    /// Extension attributes
+    pub attributes: Option<String>,
+}
+
+impl FromStr for ExtMap {
+    type Err = AttributeErr;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut i = s.splitn(3, ' ');
+
+        let Some(id_direction) = i.next() else {
+            return Err(AttributeErr(
+                "Failed to parse the ExtMap, id/direction not present",
+            ));
+        };
+
+        let mut d = id_direction.split('/');
+
+        let Some(id) = d.next() else {
+            return Err(AttributeErr("Failed to parse the ExtMap, id not present"));
+        };
+
+        let direction = if let Some(d) = d.next() {
+            let Ok(dir) = Direction::from_str(d) else {
+                return Err(AttributeErr(
+                    "Failed to parse the ExtMap, invalid direction",
+                ));
+            };
+            Some(dir)
+        } else {
+            None
+        };
+
+        let Ok(id) = id.parse::<u8>() else {
+            return Err(AttributeErr(
+                "Failed to parse the ExtMap, invalid value for id",
+            ));
+        };
+
+        let Some(uri) = i.next() else {
+            return Err(AttributeErr("Failed to parse the ExtMap, no URI present"));
+        };
+
+        let attributes = i.next().map(|attr| attr.to_string());
+
+        Ok(Self {
+            id,
+            direction,
+            uri: uri.to_string(),
+            attributes,
+        })
+    }
+}
+
+impl Display for ExtMap {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut s = self.id.to_string();
+        if let Some(direction) = &self.direction {
+            s += format!("/{}", direction.as_str()).as_str();
+        }
+
+        s += format!(" {}", self.uri).as_str();
+        if let Some(attr) = &self.attributes {
+            s += format!(" {}", attr).as_str();
+        }
+
+        f.write_str(&s)
+    }
+}
+
+impl TypedAttribute for ExtMap {
+    const NAME: &'static str = "extmap";
+}
+
 /// Originator of the session.
 ///
 /// See [RFC 8866 Section 5.2](https://tools.ietf.org/html/rfc8866#section-5.2) for more details.
@@ -1364,6 +1491,7 @@ a=fmtp:0 0-15\r
 m=video 51372/2 RTP/AVP 99 97 98\r
 a=rtpmap:99 h263-1998/90000\r
 a=fingerprint:sha-256 3A:96:6D:57:B2:C2:C7:61:A0:46:3E:1C:97:39:D3:F7:0A:88:A0:B1:EC:03:FB:10:A5:5D:3A:37:AB:DD:02:AA\r
+a=extmap:2/sendrecv http://example.com/082005/ext.htm#xmeta short\r
 ";
         let parsed = Session::parse(sdp.as_bytes()).unwrap();
         let mut written = vec![];
@@ -1388,6 +1516,17 @@ a=fingerprint:sha-256 3A:96:6D:57:B2:C2:C7:61:A0:46:3E:1C:97:39:D3:F7:0A:88:A0:B
             f[0].clone().format_specific_params[0].param,
             "0-15"
         );
+
+        let e = fallible_iterator::convert(parsed.medias[1].attributes_typed::<ExtMap>())
+            .collect::<Vec<_>>()
+            .expect("Vector of extmap attributes");
+        assert_eq!(e[0].id, 2);
+        assert_eq!(e[0].direction, Some(Direction::SendRecv));
+        assert_eq!(
+            e[0].uri,
+            "http://example.com/082005/ext.htm#xmeta".to_string()
+        );
+        assert_eq!(e[0].attributes, Some("short".to_string()));
     }
 
     #[test]
@@ -1580,6 +1719,18 @@ a=fingerprint:sha-256 3A:96:6D:57:B2:C2:C7:61:A0:46:3E:1C:97:39:D3:F7:0A:88:A0:B
                     attribute: "rtcp".into(),
                     value: None,
                 },
+                Attribute {
+                    attribute: "extmap".into(),
+                    value: Some(
+                        ExtMap {
+                            id: 1,
+                            direction: None,
+                            uri: "URI-toffset".to_string(),
+                            attributes: None,
+                        }
+                        .to_string(),
+                    ),
+                },
             ],
             medias: vec![],
         };
@@ -1628,6 +1779,15 @@ a=fingerprint:sha-256 3A:96:6D:57:B2:C2:C7:61:A0:46:3E:1C:97:39:D3:F7:0A:88:A0:B
                 .collect::<Vec<_>>(),
             &[None]
         );
+
+        assert_eq!(
+            session
+                .get_attribute_values("extmap")
+                .unwrap()
+                .collect::<Vec<_>>(),
+            &[Some("1 URI-toffset")]
+        );
+
         assert!(session.get_attribute_values("foo").is_err());
 
         let a = fallible_iterator::convert(session.attributes_typed::<RtpMap>())
