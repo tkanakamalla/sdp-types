@@ -1038,6 +1038,116 @@ impl TypedAttribute for ExtMap {
     const NAME: &'static str = "extmap";
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum HashFunc {
+    SHA1,
+    SHA224,
+    SHA256,
+    SHA384,
+    SHA512,
+    MD5,
+    MD2,
+    Other(String),
+}
+
+/// Fingerprint Attribute
+///
+/// See [RFC 8122 Section 5](https://datatracker.ietf.org/doc/html/rfc8122#section-5)
+#[derive(Debug, Clone, PartialEq)]
+pub struct Fingerprint {
+    /// Name of hash function used
+    pub hash_func: HashFunc,
+    /// Hash value
+    pub fingerprint: Vec<u8>,
+}
+
+impl FromStr for Fingerprint {
+    type Err = AttributeErr;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut i = s.splitn(2, ' ');
+
+        let hash_func = if let Some(hash_func) = i.next() {
+            if hash_func.eq_ignore_ascii_case("sha-1") {
+                HashFunc::SHA1
+            } else if hash_func.eq_ignore_ascii_case("sha-224") {
+                HashFunc::SHA224
+            } else if hash_func.eq_ignore_ascii_case("sha-256") {
+                HashFunc::SHA256
+            } else if hash_func.eq_ignore_ascii_case("sha-384") {
+                HashFunc::SHA384
+            } else if hash_func.eq_ignore_ascii_case("sha-512") {
+                HashFunc::SHA512
+            } else if hash_func.eq_ignore_ascii_case("md-5") {
+                HashFunc::MD5
+            } else if hash_func.eq_ignore_ascii_case("md-2") {
+                HashFunc::MD2
+            } else {
+                HashFunc::Other(hash_func.to_string())
+            }
+        } else {
+            return Err(AttributeErr(
+                "Failed to parse Fingerprint, hash function not found",
+            ));
+        };
+
+        let mut fingerprint: Vec<u8> = vec![];
+        if let Some(fp) = i.next() {
+            for f in fp.split(':') {
+                let Ok(mut f) = hex::decode(f) else {
+                    return Err(AttributeErr(
+                        "Failed to parse Fingerprint, hash value is not hex",
+                    ));
+                };
+
+                fingerprint.append(&mut f);
+            }
+        } else {
+            return Err(AttributeErr(
+                "Failed to parse Fingerprint, hash value not found",
+            ));
+        };
+
+        Ok(Self {
+            hash_func,
+            fingerprint,
+        })
+    }
+}
+
+impl Display for Fingerprint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut s = match &self.hash_func {
+            HashFunc::SHA1 => "sha-1".to_string(),
+            HashFunc::SHA224 => "sha-224".to_string(),
+            HashFunc::SHA256 => "sha-256".to_string(),
+            HashFunc::SHA384 => "sha-384".to_string(),
+            HashFunc::SHA512 => "sha-512".to_string(),
+            HashFunc::MD5 => "md-5".to_string(),
+            HashFunc::MD2 => "md-2".to_string(),
+            HashFunc::Other(s) => s.clone(),
+        };
+
+        let mut first = true;
+        for v in &self.fingerprint {
+            if first {
+                s += " ";
+                first = false;
+            } else {
+                s += ":";
+            }
+
+            s += format!("{:X}", v).as_str();
+        }
+
+        f.write_str(&s)
+    }
+}
+
+impl TypedAttribute for Fingerprint {
+    const NAME: &'static str = "fingerprint";
+}
+
 /// Originator of the session.
 ///
 /// See [RFC 8866 Section 5.2](https://tools.ietf.org/html/rfc8866#section-5.2) for more details.
@@ -1527,6 +1637,14 @@ a=extmap:2/sendrecv http://example.com/082005/ext.htm#xmeta short\r
             "http://example.com/082005/ext.htm#xmeta".to_string()
         );
         assert_eq!(e[0].attributes, Some("short".to_string()));
+
+        let f = fallible_iterator::convert(parsed.medias[1].attributes_typed::<Fingerprint>())
+            .collect::<Vec<_>>()
+            .expect("Vector of fingerprint attributes");
+
+        assert_eq!(f[0].hash_func, HashFunc::SHA256);
+        assert_eq!(f[0].fingerprint[4], 0xB2);
+        assert_eq!(f[0].fingerprint.last(), Some(&0xAA));
     }
 
     #[test]
@@ -1601,6 +1719,16 @@ a=extmap:2/sendrecv http://example.com/082005/ext.htm#xmeta short\r
                         .to_string(),
                     ),
                 },
+                Attribute {
+                    attribute: "fingerprint".into(),
+                    value: Some(
+                        Fingerprint {
+                            hash_func: HashFunc::Other(("custom").to_string()),
+                            fingerprint: [0xA1, 0xB2, 0xC3, 0xD4, 0xE5, 0xF6].to_vec(),
+                        }
+                        .to_string(),
+                    ),
+                },
             ],
         };
 
@@ -1665,6 +1793,14 @@ a=extmap:2/sendrecv http://example.com/082005/ext.htm#xmeta short\r
         let r = media.attributes_typed::<Rtcp>().collect::<Vec<_>>();
         assert_eq!(r[0].as_ref().unwrap().addrtype, AddrType::Ip4);
         assert_eq!(r[0].as_ref().unwrap().port, 53020);
+
+        assert_eq!(
+            media
+                .get_attribute_values("fingerprint")
+                .unwrap()
+                .collect::<Vec<_>>(),
+            &[Some("custom A1:B2:C3:D4:E5:F6")]
+        );
 
         assert!(media.get_attribute_values("foo").is_err());
     }
