@@ -1306,6 +1306,161 @@ impl TypedAttribute for Setup {
     const NAME: &'static str = "setup";
 }
 
+/// Source attribute types.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SsrcAttribute {
+    /// See [RFC 5576 Section 6.1](https://tools.ietf.org/html/rfc5576#section-6.1)
+    Cname,
+    /// See [RFC 5576 Section 6.2](https://tools.ietf.org/html/rfc5576#section-6.2)
+    PreviousSsrc,
+    /// See [RFC 5576 Section 6.3](https://tools.ietf.org/html/rfc5576#section-6.3)
+    Fmtp,
+    /// See [RFC 5576 Section 6.4](https://tools.ietf.org/html/rfc5576#section-6.4)
+    Other(String),
+}
+
+/// SSRC media attribute.
+///
+/// See [RFC 5576 Section 4.1](https://tools.ietf.org/html/rfc5576#section-4.1)
+#[derive(Debug, Clone, PartialEq)]
+pub struct Ssrc {
+    pub ssrc_id: u32,
+    pub attribute: SsrcAttribute,
+    pub value: Option<String>,
+}
+
+impl FromStr for Ssrc {
+    type Err = AttributeErr;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let Some((ssrc_id_str, rest)) = s.split_once(' ') else {
+            return Err(AttributeErr("Failed to parse Ssrc, no ssrc id"));
+        };
+
+        let Ok(ssrc_id) = ssrc_id_str.parse::<u32>() else {
+            return Err(AttributeErr("Failed to parse Ssrc, invalid ssrc id"));
+        };
+
+        let (attr, value) = if let Some((attr_str, value)) = rest.split_once(':') {
+            (attr_str, Some(value.to_string()))
+        } else {
+            (rest, None)
+        };
+
+        let attribute = if "cname".eq_ignore_ascii_case(attr) {
+            SsrcAttribute::Cname
+        } else if "previous-ssrc".eq_ignore_ascii_case(attr) {
+            SsrcAttribute::PreviousSsrc
+        } else if "fmtp".eq_ignore_ascii_case(attr) {
+            SsrcAttribute::Fmtp
+        } else {
+            SsrcAttribute::Other(attr.to_string())
+        };
+
+        Ok(Self {
+            ssrc_id,
+            attribute,
+            value,
+        })
+    }
+}
+
+impl Display for Ssrc {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut s = self.ssrc_id.to_string();
+        let attr_str = match &self.attribute {
+            SsrcAttribute::Cname => "cname",
+            SsrcAttribute::PreviousSsrc => "previous-ssrc",
+            SsrcAttribute::Fmtp => "fmtp",
+            SsrcAttribute::Other(other) => other.as_str(),
+        };
+
+        s += format!(" {}", attr_str).as_str();
+
+        if let Some(value) = &self.value {
+            s += format!(":{}", value).as_str();
+        }
+
+        f.write_str(&s)
+    }
+}
+
+impl TypedAttribute for Ssrc {
+    const NAME: &'static str = "ssrc";
+}
+
+/// SSRC group attribute
+///
+/// See [RFC 5576 Section 4.2](https://tools.ietf.org/html/rfc5576#section-4.2)
+pub struct SsrcGroup {
+    pub semantics: GroupSemantics,
+    pub ssrc_ids: Vec<u32>,
+}
+
+impl FromStr for SsrcGroup {
+    type Err = AttributeErr;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut i = s.split(' ');
+
+        let Some(semantics) = i.next() else {
+            return Err(AttributeErr(
+                "Failed to parse SsrcGroup, semantics not available",
+            ));
+        };
+
+        let semantics = if "FEC".eq_ignore_ascii_case(semantics) {
+            GroupSemantics::FEC
+        } else if "FID".eq_ignore_ascii_case(semantics) {
+            GroupSemantics::FID
+        } else {
+            // The initial defined semantics for ssrc-group attribute are FID and FEC
+            // The other registered group semantics are not useful for source grouping
+            // But keep this open for any other new semantics that are not part of GroupSemantics
+            GroupSemantics::Other(semantics.to_string())
+        };
+
+        let mut ssrc_ids = vec![];
+        for ssrc_id in i {
+            let Ok(ssrc_id) = ssrc_id.parse::<u32>() else {
+                return Err(AttributeErr("Failed to parse SsrcGroup, invalid ssrc id"));
+            };
+            ssrc_ids.push(ssrc_id);
+        }
+
+        Ok(Self {
+            semantics,
+            ssrc_ids,
+        })
+    }
+}
+
+impl Display for SsrcGroup {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut s = match &self.semantics {
+            GroupSemantics::FEC => "FEC".to_string(),
+            GroupSemantics::FID => "FID".to_string(),
+            // Semantics other than FEC and FID are not useful for source grouping but still displaying
+            // them for debugging purpose
+            GroupSemantics::LS => "LS".to_string(),
+            GroupSemantics::SRF => "SRF".to_string(),
+            GroupSemantics::ANAT => "ANAT".to_string(),
+            GroupSemantics::DDP => "DDP".to_string(),
+            GroupSemantics::Other(s) => s.clone(),
+        };
+
+        for ssrc_id in &self.ssrc_ids {
+            s += format!(" {}", ssrc_id).as_str();
+        }
+
+        f.write_str(&s)
+    }
+}
+
+impl TypedAttribute for SsrcGroup {
+    const NAME: &'static str = "ssrc-group";
+}
+
 /// Originator of the session.
 ///
 /// See [RFC 8866 Section 5.2](https://tools.ietf.org/html/rfc8866#section-5.2) for more details.
@@ -2164,10 +2319,59 @@ a=connection:new\r
 ";
         let media = Session::parse(sdp.as_bytes()).unwrap().medias;
 
-
         let s = media[0].attributes_typed::<Setup>().collect::<Vec<_>>();
 
         assert_eq!(s.len(), 1);
         assert_eq!(s[0].as_ref().unwrap().to_owned(), Setup::ActPass);
+    }
+
+    #[test]
+    fn parse_ssrc_attributes() {
+        let sdp = "v=0\r
+o=jdoe 2890844526 2890842807 IN IP4 10.47.16.5\r
+m=video 49174 RTP/AVPF 96 98\r
+a=rtpmap:98 rtx/90000\r
+a=fmtp:98 apt=96;rtx-time=3000\r
+a=ssrc-group:FID 11111 22222\r
+a=ssrc:11111 cname:user3@example.com\r
+a=ssrc:22222 fmtp:0 0-15\r
+a=ssrc-group:FID 33333 44444\r
+a=ssrc:33333 cname:user3@example.com\r
+a=ssrc:44444 cname:user3@example.com\r
+a=ssrc:1698359993 ts-refclk:ntp=pool.ntp.org
+";
+
+        let parsed = Session::parse(sdp.as_bytes()).unwrap();
+        let m = &parsed.medias[0];
+
+        let ssrcs = m
+            .attributes_typed::<Ssrc>()
+            .filter(|s| {
+                let Ok(ssrc) = s else { return false };
+                ssrc.attribute == SsrcAttribute::Fmtp
+                    || matches!(ssrc.attribute, SsrcAttribute::Other(_))
+            })
+            .collect::<Vec<_>>();
+
+        let ssrc_id = ssrcs[0].as_ref().unwrap().ssrc_id;
+
+        let ssrc_groups = m
+            .attributes_typed::<SsrcGroup>()
+            .filter(|s| {
+                let Ok(ssrc_group) = s else { return false };
+
+                ssrc_group.ssrc_ids[1] == ssrc_id
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            ssrc_groups[0].as_ref().unwrap().semantics,
+            GroupSemantics::FID
+        );
+
+        assert_eq!(
+            ssrcs[1].as_ref().unwrap().attribute,
+            SsrcAttribute::Other("ts-refclk".to_string())
+        );
     }
 }
