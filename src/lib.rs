@@ -1461,6 +1461,370 @@ impl TypedAttribute for SsrcGroup {
     const NAME: &'static str = "ssrc-group";
 }
 
+/// See [RFC 4568 Section 10.3.2](https://datatracker.ietf.org/doc/html/rfc4568#section-10.3.2)
+///
+/// Note: `F8_128_HMAC_SHA1_32` appears in the [RFC 4568 Section 9.2](https://datatracker.ietf.org/doc/html/rfc4568#section-9.2)
+/// grammar but was never registered in the IANA registry, so it is not defined as a variant here.
+/// It will be parsed as `Other`.
+#[derive(Debug, PartialEq, Clone)]
+pub enum CryptoSuite {
+    /// AES_CM_128_HMAC_SHA1_80
+    AesCm128HmacSha1_80,
+    /// AES_CM_128_HMAC_SHA1_32
+    AesCm128HmacSha1_32,
+    /// F8_128_HMAC_SHA1_80
+    F8_128HmacSha1_80,
+    /// Other Crypto Suite
+    Other(String),
+}
+
+#[derive(Debug, PartialEq, Clone)]
+/// SRTP Key parameter
+///
+/// See [RFC 4568 Section 6.1](https://datatracker.ietf.org/doc/html/rfc4568#section-6.1)
+pub struct SrtpKeyParam {
+    /// Concatenated key and salt, base64 encoded
+    pub key_and_salt: String,
+    /// Master key lifetime (max number of SRTP or SRTCP packets using this master key)
+    pub lifetime: Option<u32>,
+    /// MKI (Master Key Identifier) and length of the MKI field in SRTP packets
+    pub mki_and_length: Option<(u32, u32)>,
+}
+
+impl FromStr for SrtpKeyParam {
+    type Err = AttributeErr;
+    fn from_str(key_param: &str) -> Result<Self, Self::Err> {
+        let mut k = key_param.split('|');
+
+        let Some(key_and_salt_with_method) = k.next() else {
+            return Err(AttributeErr("Failed to parse key and salt"));
+        };
+
+        let key_and_salt = if key_and_salt_with_method.get(..7).map_or(false, |p| p.eq_ignore_ascii_case("inline:")) {
+            &key_and_salt_with_method[7..]
+        } else {
+            return Err(AttributeErr(
+                "Failed to strip the key method (inline:) from the key parameter",
+            ));
+        };
+
+        let (lifetime, mki_and_length) = if let Some(next_param) = k.next() {
+            match next_param.split_once(':') {
+                Some(mki_and_length) => {
+                    // lifetime is not specified, but only MKI and its length
+                    let Ok(mki) = mki_and_length.0.parse::<u32>() else {
+                        return Err(AttributeErr("Failed to parse MKI value"));
+                    };
+
+                    let Ok(len) = mki_and_length.1.parse::<u32>() else {
+                        return Err(AttributeErr("Failed to parse MKI length"));
+                    };
+                    (None, Some((mki, len)))
+                }
+                None => {
+                    // lifetime is specified
+                    let lifetime = match next_param.strip_prefix("2^") {
+                        Some(exp) => {
+                            let Ok(exp) = exp.parse::<u32>() else {
+                                return Err(AttributeErr("Failed to parse lifetime exponent"));
+                            };
+                            // 2u32.pow(exp) panics for exp >= 32
+                            if exp >= 32 {
+                                return Err(AttributeErr("Lifetime exponent too large"));
+                            }
+                            Some(2u32.pow(exp))
+                        }
+                        None => {
+                            let Ok(lifetime) = next_param.parse::<u32>() else {
+                                return Err(AttributeErr("Failed to parse lifetime value"));
+                            };
+                            Some(lifetime)
+                        }
+                    };
+
+                    // now parse the MKI and length
+                    let mki_and_length = if let Some(m) = k.next() {
+                        if let Some(p) = m.split_once(':') {
+                            let Ok(mki) = p.0.parse::<u32>() else {
+                                return Err(AttributeErr("Failed to parse MKI value"));
+                            };
+
+                            let Ok(len) = p.1.parse::<u32>() else {
+                                return Err(AttributeErr("Failed to parse MKI length"));
+                            };
+                            Some((mki, len))
+                        } else {
+                            return Err(AttributeErr("Failed to parse MKI and Length"));
+                        }
+                    } else {
+                        None
+                    };
+
+                    (lifetime, mki_and_length)
+                }
+            }
+        } else {
+            (None, None)
+        };
+
+        if let Some((_, len)) = mki_and_length {
+            if !(1..=128).contains(&len) {
+                return Err(AttributeErr("MKI length outside the range 1-128"));
+            }
+        }
+
+        Ok(Self {
+            key_and_salt: key_and_salt.to_string(),
+            lifetime,
+            mki_and_length,
+        })
+    }
+}
+
+impl Display for SrtpKeyParam {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut s = format!("inline:{}", self.key_and_salt);
+        if let Some(lifetime) = self.lifetime {
+            if lifetime.is_power_of_two() {
+                s += format!("|2^{}", lifetime.trailing_zeros()).as_str();
+            } else {
+                s += format!("|{}", lifetime).as_str();
+            }
+        }
+
+        if let Some((mki, length)) = self.mki_and_length {
+            s += format!("|{}:{}", mki, length).as_str()
+        }
+        f.write_str(&s)
+    }
+}
+
+/// Signals whether FEC is applied before or after SRTP processing
+///
+/// See [RFC 4568 Section 6.3.5](https://datatracker.ietf.org/doc/html/rfc4568#section-6.3.5)
+#[derive(Debug, PartialEq, Clone)]
+pub enum FecOrder {
+    /// FEC is applied before SRTP processing
+    FecSrtp,
+    /// FEC is applied after SRTP processing
+    SrtpFec,
+}
+
+/// SRTP session parameters
+///
+/// See [RFC 4568 Section 6.3](https://datatracker.ietf.org/doc/html/rfc4568#section-6.3)
+#[derive(Debug, PartialEq, Clone)]
+pub enum SrtpSessionParam {
+    /// Key Derivation Rate
+    ///
+    /// See [RFC 4568 Section 6.3.1](https://datatracker.ietf.org/doc/html/rfc4568#section-6.3.1)
+    Kdr(u8),
+    /// Signals that the SRTP packets are without encryption
+    ///
+    /// See [RFC 4568 Section 6.3.2](https://datatracker.ietf.org/doc/html/rfc4568#section-6.3.2)
+    UnencryptedSrtp,
+    /// Signals that the SRTCP packets are without encryption
+    ///
+    /// See [RFC 4568 Section 6.3.2](https://datatracker.ietf.org/doc/html/rfc4568#section-6.3.2)
+    UnencryptedSrtcp,
+    /// Signals that the SRTP packets are not authenticated. (Not recommended)
+    ///
+    /// See [RFC 4568 Section 6.3.3](https://datatracker.ietf.org/doc/html/rfc4568#section-6.3.3)
+    UnauthenticatedSrtp,
+    /// Signals whether FEC is applied before or after SRTP processing
+    ///
+    /// See [RFC 4568 Section 6.3.4](https://datatracker.ietf.org/doc/html/rfc4568#section-6.3.4)
+    FecOrder(FecOrder),
+    /// Signals the use of separate master key(s) for forward error correction
+    ///
+    /// See [RFC 4568 Section 6.3.5](https://datatracker.ietf.org/doc/html/rfc4568#section-6.3.5)
+    FecKey(Vec<SrtpKeyParam>),
+    /// Window Size Hint - provides a hint for how big the SRTP Window size should be
+    ///
+    /// See [RFC 4568 Section 6.3.6](https://datatracker.ietf.org/doc/html/rfc4568#section-6.3.6)
+    Wsh(u8),
+    /// Unknown parameter
+    Extension(String),
+}
+
+/// Cryptographic information for the media
+///
+/// See [RFC 4568 Section 3](https://tools.ietf.org/html/rfc4568#section-4)
+#[derive(Debug, PartialEq, Clone)]
+pub struct Crypto {
+    pub tag: u32,
+    pub crypto_suite: CryptoSuite,
+    pub key_params: Vec<SrtpKeyParam>,
+    pub session_params: Vec<SrtpSessionParam>,
+}
+
+impl FromStr for Crypto {
+    type Err = AttributeErr;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut i = s.split(' ');
+
+        let Some(tag) = i.next() else {
+            return Err(AttributeErr("Failed to parse Crypto, Tag not available"));
+        };
+
+        let Ok(tag) = tag.parse::<u32>() else {
+            return Err(AttributeErr("Failed to parse tag, not a u32"));
+        };
+
+        let Some(crypto_suite) = i.next() else {
+            return Err(AttributeErr(
+                "Failed to parse Crypto, CryptoSuite not available",
+            ));
+        };
+
+        let crypto_suite = if "AES_CM_128_HMAC_SHA1_32".eq_ignore_ascii_case(crypto_suite) {
+            CryptoSuite::AesCm128HmacSha1_32
+        } else if "F8_128_HMAC_SHA1_80".eq_ignore_ascii_case(crypto_suite) {
+            CryptoSuite::F8_128HmacSha1_80
+        } else if "AES_CM_128_HMAC_SHA1_80".eq_ignore_ascii_case(crypto_suite) {
+            CryptoSuite::AesCm128HmacSha1_80
+        } else {
+            CryptoSuite::Other(crypto_suite.to_string())
+        };
+
+        let Some(key_params_str) = i.next() else {
+            return Err(AttributeErr(
+                "Failed to parse Crypto, Key params not available",
+            ));
+        };
+
+        let mut key_params: Vec<SrtpKeyParam> = Vec::new();
+
+        for key_param in key_params_str.split(';') {
+            if let Ok(key_param) = SrtpKeyParam::from_str(key_param) {
+                key_params.push(key_param);
+            }
+        }
+
+        let mut session_params: Vec<SrtpSessionParam> = Vec::new();
+        for s in &mut i {
+            let s = s.to_ascii_uppercase();
+            let param = if let Some(kdr_val) = s.strip_prefix("KDR=") {
+                let Ok(kdr_val) = kdr_val.parse::<u8>() else {
+                    return Err(AttributeErr(
+                        "Failed to parse KDR value in Crypto attribute",
+                    ));
+                };
+
+                // Note: the range for KDR value is conflicting in the spec,
+                // rfc4568#section-6.3.1 says the range should be 1,2,...24 and
+                // the grammar in rfc4568#section-9.2 says it should be 0..24.
+                // So using the bigger range i.e., 0..24 for now
+                if !(0..=24).contains(&kdr_val) {
+                    return Err(AttributeErr("KDR value invalid, out of range 0-24"));
+                }
+                SrtpSessionParam::Kdr(kdr_val)
+            } else if s == "UNENCRYPTED_SRTCP" {
+                SrtpSessionParam::UnencryptedSrtcp
+            } else if s == "UNENCRYPTED_SRTP" {
+                SrtpSessionParam::UnencryptedSrtp
+            } else if s == "UNAUTHENTICATED_SRTP" {
+                SrtpSessionParam::UnauthenticatedSrtp
+            } else if let Some(fec_ord) = s.strip_prefix("FEC_ORDER=") {
+                if fec_ord.eq_ignore_ascii_case("FEC_SRTP") {
+                    SrtpSessionParam::FecOrder(FecOrder::FecSrtp)
+                } else if fec_ord.eq_ignore_ascii_case("SRTP_FEC") {
+                    SrtpSessionParam::FecOrder(FecOrder::SrtpFec)
+                } else {
+                    return Err(AttributeErr(
+                        "Error parsing Crypto attribute, FEC order invalid",
+                    ));
+                }
+            } else if let Some(key_params_str) = s.strip_prefix("FEC_KEY=") {
+                let mut key_params: Vec<SrtpKeyParam> = Vec::new();
+
+                for key_param in key_params_str.split(';') {
+                    if let Ok(key_param) = SrtpKeyParam::from_str(key_param) {
+                        key_params.push(key_param);
+                    }
+                }
+                SrtpSessionParam::FecKey(key_params)
+            } else if let Some(wsh_val) = s.strip_prefix("WSH=") {
+                let Ok(wsh_val) = wsh_val.parse::<u8>() else {
+                    return Err(AttributeErr(
+                        "Failed to parse WSH value in Crypto attribute",
+                    ));
+                };
+
+                if wsh_val < 64 {
+                    return Err(AttributeErr("WSH value invalid, less than 64"));
+                }
+                SrtpSessionParam::Wsh(wsh_val)
+            } else {
+                // Extension
+                SrtpSessionParam::Extension(s.to_string())
+            };
+            session_params.push(param);
+        }
+
+        Ok(Self {
+            tag,
+            key_params,
+            crypto_suite,
+            session_params,
+        })
+    }
+}
+
+impl Display for Crypto {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut s = self.tag.to_string();
+
+        let crypto_suite_str = match &self.crypto_suite {
+            CryptoSuite::AesCm128HmacSha1_80 => "AES_CM_128_HMAC_SHA1_80",
+            CryptoSuite::AesCm128HmacSha1_32 => "AES_CM_128_HMAC_SHA1_32",
+            CryptoSuite::F8_128HmacSha1_80 => "F8_128_HMAC_SHA1_80",
+            CryptoSuite::Other(s) => s.as_str(),
+        };
+
+        s += format!(" {}", crypto_suite_str).as_str();
+
+        for (i, key_param) in self.key_params.iter().enumerate() {
+            s += format!("{}{}", if i == 0 { ' ' } else { ';' }, key_param).as_str();
+        }
+
+        for session_param in &self.session_params {
+            let param = match session_param {
+                SrtpSessionParam::Kdr(kdr) => format!(" KDR={kdr}"),
+                SrtpSessionParam::UnencryptedSrtp => " UNENCRYPTED_SRTP".to_string(),
+                SrtpSessionParam::UnencryptedSrtcp => " UNENCRYPTED_SRTCP".to_string(),
+                SrtpSessionParam::UnauthenticatedSrtp => " UNAUTHENTICATED_SRTP".to_string(),
+                SrtpSessionParam::FecOrder(fec_order) => {
+                    let order = match fec_order {
+                        FecOrder::FecSrtp => "FEC_SRTP",
+                        FecOrder::SrtpFec => "SRTP_FEC",
+                    };
+                    format!(" FEC_ORDER={order}")
+                }
+                SrtpSessionParam::FecKey(srtp_key_params) => {
+                    let mut fec_keys = " FEC_KEY".to_string();
+                    for (i, key_param) in srtp_key_params.iter().enumerate() {
+                        fec_keys +=
+                            format!("{}{}", if i == 0 { '=' } else { ';' }, key_param).as_str();
+                    }
+                    fec_keys
+                }
+                SrtpSessionParam::Wsh(wsh) => format!(" WSH={wsh}"),
+                SrtpSessionParam::Extension(extn) => format!(" {extn}"),
+            };
+
+            s += param.as_str();
+        }
+
+        f.write_str(&s)
+    }
+}
+
+impl TypedAttribute for Crypto {
+    const NAME: &'static str = "crypto";
+}
+
 /// Originator of the session.
 ///
 /// See [RFC 8866 Section 5.2](https://tools.ietf.org/html/rfc8866#section-5.2) for more details.
@@ -2372,6 +2736,95 @@ a=ssrc:1698359993 ts-refclk:ntp=pool.ntp.org
         assert_eq!(
             ssrcs[1].as_ref().unwrap().attribute,
             SsrcAttribute::Other("ts-refclk".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_crypto_attributes() {
+        let sdp = "v=0\r
+o=sam 2890844526 2890842807 IN IP4 10.47.16.5\r
+s=SRTP Discussion\r
+i=A discussion of Secure RTP\r
+u=http://www.example.com/seminars/srtp.pdf\r
+e=marge@example.com (Marge Simpson)\r
+c=IN IP4 168.2.17.12\r
+t=2873397496 2873404696\r
+m=audio 49170 RTP/SAVP 0\r
+a=crypto:1 AES_CM_128_HMAC_SHA1_80 inline:WVNfX19zZW1jdGwgKCkgewkyMjA7fQp9CnVubGVz|2^20|1:4 FEC_ORDER=SRTP_FEC\r
+a=crypto:2 F8_128_HMAC_SHA1_80 inline:MTIzNDU2Nzg5QUJDREUwMTIzNDU2Nzg5QUJjZGVm|2^20|1:4;inline:QUJjZGVmMTIzNDU2Nzg5QUJDREUwMTIzNDU2Nzg5|2^20|2:4 FEC_ORDER=FEC_SRTP\r
+m=video 51372 RTP/SAVP 31\r
+a=crypto:1 AES_CM_128_HMAC_SHA1_80 inline:YUJDZGVmZ2hpSktMbW9QUXJzVHVWd3l6MTIzNDU2|1066:4\r
+";
+
+        let parsed = Session::parse(sdp.as_bytes()).unwrap();
+        let a = &parsed.medias[0];
+
+        let audio_cryptos = a.attributes_typed::<Crypto>().collect::<Vec<_>>();
+
+        assert_eq!(
+            audio_cryptos[0].as_ref().unwrap().crypto_suite,
+            CryptoSuite::AesCm128HmacSha1_80
+        );
+        assert_eq!(audio_cryptos[1].as_ref().unwrap().key_params.len(), 2);
+
+        assert_eq!(
+            audio_cryptos[1].as_ref().unwrap().key_params[1].mki_and_length,
+            Some((2, 4))
+        );
+
+        assert_eq!(
+            audio_cryptos[1].as_ref().unwrap().session_params[0],
+            SrtpSessionParam::FecOrder(FecOrder::FecSrtp)
+        );
+
+        let v = &parsed.medias[1];
+
+        let video_cryptos = v
+            .attributes_typed::<Crypto>()
+            .filter(|c| {
+                let Ok(crypto) = c else { return false };
+
+                crypto.tag == 1
+            })
+            .collect::<Vec<_>>();
+
+        let test_crypto = Crypto {
+            tag: 1,
+            crypto_suite: CryptoSuite::AesCm128HmacSha1_80,
+            key_params: vec![SrtpKeyParam {
+                key_and_salt: "YUJDZGVmZ2hpSktMbW9QUXJzVHVWd3l6MTIzNDU2".to_string(),
+                lifetime: None,
+                mki_and_length: Some((1066, 4)),
+            }],
+            session_params: Vec::new(),
+        };
+
+        assert_eq!(&test_crypto, video_cryptos[0].as_ref().unwrap());
+    }
+
+    #[test]
+    fn write_crypto_attribute() {
+        let crypto = Crypto {
+            tag: 1,
+            crypto_suite: CryptoSuite::AesCm128HmacSha1_80,
+            key_params: vec![
+                SrtpKeyParam {
+                    key_and_salt: "WVNfX19zZW1jdGwgKCkgewkyMjA7fQp9CnVubGVz".to_string(),
+                    lifetime: Some(1048576),
+                    mki_and_length: Some((1, 4)),
+                },
+                SrtpKeyParam {
+                    key_and_salt: "WVNfX19zZW1jdGwgKCkgewkyMjA7fQp9CnVubGVz".to_string(),
+                    lifetime: Some(1048576),
+                    mki_and_length: Some((1, 4)),
+                },
+            ],
+            session_params: vec![SrtpSessionParam::FecOrder(FecOrder::SrtpFec)],
+        };
+
+        assert_eq!(
+            crypto.to_string(),
+            "1 AES_CM_128_HMAC_SHA1_80 inline:WVNfX19zZW1jdGwgKCkgewkyMjA7fQp9CnVubGVz|2^20|1:4;inline:WVNfX19zZW1jdGwgKCkgewkyMjA7fQp9CnVubGVz|2^20|1:4 FEC_ORDER=SRTP_FEC"
         );
     }
 }
