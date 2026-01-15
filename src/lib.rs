@@ -1257,6 +1257,55 @@ impl TypedAttribute for Group {
     const NAME: &'static str = "group";
 }
 
+/// Setup attribute for the session or media.
+///
+/// See [RFC 4145 Section 4](https://tools.ietf.org/html/rfc4145#section-4) for more details.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Setup {
+    /// Initiator of the connection.
+    Active,
+    /// Acceptor of the connection.
+    Passive,
+    /// Act as either initiator or acceptor of the connection.
+    ActPass,
+    /// Do not establish a connection.
+    HoldConn,
+}
+
+impl FromStr for Setup {
+    type Err = AttributeErr;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if "active".eq_ignore_ascii_case(s) {
+            Ok(Setup::Active)
+        } else if "passive".eq_ignore_ascii_case(s) {
+            Ok(Setup::Passive)
+        } else if "actpass".eq_ignore_ascii_case(s) {
+            Ok(Setup::ActPass)
+        } else if "holdconn".eq_ignore_ascii_case(s) {
+            Ok(Setup::HoldConn)
+        } else {
+            Err(AttributeErr("Invalid Setup value {s}"))
+        }
+    }
+}
+
+impl Display for Setup {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            Setup::Active => "active",
+            Setup::Passive => "passive",
+            Setup::ActPass => "actpass",
+            Setup::HoldConn => "holdconn",
+        };
+        f.write_str(s)
+    }
+}
+
+impl TypedAttribute for Setup {
+    const NAME: &'static str = "setup";
+}
+
 /// Originator of the session.
 ///
 /// See [RFC 8866 Section 5.2](https://tools.ietf.org/html/rfc8866#section-5.2) for more details.
@@ -2103,5 +2152,22 @@ a=mid:3\r
             g[0].as_ref().unwrap().mid_tags,
             vec!["1".to_string(), "2".to_string()]
         );
+    }
+
+    #[test]
+    fn parse_setup_attribute() {
+        let sdp = "v=0\r
+m=image 54111 TCP t38\r
+c=IN IP4 192.0.2.2\r
+a=setup:actpass\r
+a=connection:new\r
+";
+        let media = Session::parse(sdp.as_bytes()).unwrap().medias;
+
+
+        let s = media[0].attributes_typed::<Setup>().collect::<Vec<_>>();
+
+        assert_eq!(s.len(), 1);
+        assert_eq!(s[0].as_ref().unwrap().to_owned(), Setup::ActPass);
     }
 }
