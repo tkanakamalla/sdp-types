@@ -1148,6 +1148,115 @@ impl TypedAttribute for Fingerprint {
     const NAME: &'static str = "fingerprint";
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum GroupSemantics {
+    /// Lip Synchronization
+    ///
+    /// See [RFC 5888 Section 7](https://datatracker.ietf.org/doc/html/rfc5888#section-7)
+    LS,
+    /// Flow Identification
+    ///
+    /// See [RFC 5888 Section 8](https://datatracker.ietf.org/doc/html/rfc5888#section-8)
+    FID,
+    /// Single Reservation Flow
+    ///
+    /// See [RFC 3524 Section 2](https://datatracker.ietf.org/doc/html/rfc3524#section-2)
+    SRF,
+    /// Alternative Network Address Types
+    ///
+    /// See [RFC 4091 Section 3](https://datatracker.ietf.org/doc/html/rfc4091#section-3)
+    ANAT,
+    /// Forward Error Correction
+    ///
+    /// See [RFC 4756 Section 4](https://datatracker.ietf.org/doc/html/rfc4756#section-4)
+    FEC,
+    /// Decoding Dependency
+    ///
+    /// See [RFC 5582 Section 5.2.1](https://datatracker.ietf.org/doc/html/rfc5583#section-5.2.1)
+    DDP,
+    /// Other Semantics
+    Other(String),
+}
+
+/// Group Attribute
+///
+/// See [RFC 5888 Section 5](https://datatracker.ietf.org/doc/html/rfc5888#section-5)
+#[derive(Debug, Clone, PartialEq)]
+pub struct Group {
+    pub semantics: GroupSemantics,
+    pub mid_tags: Vec<String>,
+}
+
+impl FromStr for Group {
+    type Err = AttributeErr;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut i = s.split(' ');
+
+        let Some(semantics) = i.next() else {
+            return Err(AttributeErr(
+                "Failed to parse Group, semantics not available",
+            ));
+        };
+
+        let semantics = if "LS".eq_ignore_ascii_case(semantics) {
+            GroupSemantics::LS
+        } else if "FID".eq_ignore_ascii_case(semantics) {
+            GroupSemantics::FID
+        } else if "SRF".eq_ignore_ascii_case(semantics) {
+            GroupSemantics::SRF
+        } else if "ANAT".eq_ignore_ascii_case(semantics) {
+            GroupSemantics::ANAT
+        } else if "FEC".eq_ignore_ascii_case(semantics) {
+            GroupSemantics::FEC
+        } else if "DDP".eq_ignore_ascii_case(semantics) {
+            GroupSemantics::DDP
+        } else {
+            GroupSemantics::Other(semantics.to_string())
+        };
+
+        let mut mid_tags = vec![];
+        for mid in i {
+            mid_tags.push(mid.to_string());
+        }
+
+        if mid_tags.is_empty() {
+            return Err(AttributeErr(
+                "Failed to parse Group, media identification tags not available",
+            ));
+        }
+
+        Ok(Self {
+            semantics,
+            mid_tags,
+        })
+    }
+}
+
+impl Display for Group {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut s = match &self.semantics {
+            GroupSemantics::LS => "LS".to_string(),
+            GroupSemantics::FID => "FS".to_string(),
+            GroupSemantics::SRF => "SRF".to_string(),
+            GroupSemantics::ANAT => "ANAT".to_string(),
+            GroupSemantics::DDP => "DDP".to_string(),
+            GroupSemantics::FEC => "FEC".to_string(),
+            GroupSemantics::Other(s) => s.clone(),
+        };
+
+        for m in &self.mid_tags {
+            s += format!(" {}", m).as_str();
+        }
+
+        f.write_str(&s)
+    }
+}
+
+impl TypedAttribute for Group {
+    const NAME: &'static str = "group";
+}
+
 /// Originator of the session.
 ///
 /// See [RFC 8866 Section 5.2](https://tools.ietf.org/html/rfc8866#section-5.2) for more details.
@@ -1967,6 +2076,32 @@ a=rtcp-fb:* ccm tmmbr smaxpr=120\r
         assert_eq!(
             v[4].val,
             RtcpFbVal::Ccm(RtcpFbCcm::Tmmbr(Some("smaxpr=120".to_string())))
+        );
+    }
+
+    #[test]
+    fn parse_group_attribute() {
+        let sdp = "v=0\r
+o=Laura 289083124 289083124 IN IP4 two.example.com\r
+c=IN IP4 233.252.0.1/127\r
+t=0 0\r
+a=group:LS 1 2\r
+m=audio 30000 RTP/AVP 0\r
+a=mid:1\r
+m=video 30002 RTP/AVP 31\r
+a=mid:2\r
+m=audio 30004 RTP/AVP 0\r
+i=This media stream contains the Spanish translation\r
+a=mid:3\r
+";
+        let parsed = Session::parse(sdp.as_bytes()).unwrap();
+
+        let g = parsed.attributes_typed::<Group>().collect::<Vec<_>>();
+        assert_eq!(g.len(), 1);
+        assert_eq!(g[0].as_ref().unwrap().semantics, GroupSemantics::LS);
+        assert_eq!(
+            g[0].as_ref().unwrap().mid_tags,
+            vec!["1".to_string(), "2".to_string()]
         );
     }
 }
