@@ -33,7 +33,7 @@
 //! }
 //!
 //! // Access all the 'rtpmap' attributes as a `RtpMap` type
-//! // returns an iterator of type `Iterator<Item = Result<RtpMap, AttributeErr>>`
+//! // returns an iterator of type `Iterator<Item = Result<RtpMap, AttributeError>>`
 //! let r = sdp.attributes_typed::<sdp_types::RtpMap>();
 //! ```
 //!
@@ -371,7 +371,7 @@ impl Display for TransportProto {
 }
 
 /// Trait for Typed Attribute structs
-pub trait TypedAttribute: Display + FromStr<Err = AttributeErr> {
+pub trait TypedAttribute: Display + FromStr<Err = AttributeError> {
     const NAME: &'static str;
 }
 
@@ -394,32 +394,53 @@ pub struct RtpMap {
 }
 
 impl FromStr for RtpMap {
-    type Err = AttributeErr;
+    type Err = AttributeError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let Some((pt, rest)) = s.split_once(' ') else {
-            return Err(AttributeErr("Failed to split the rtpmap using a space"));
+            return Err(AttributeError::UnsupportedFormat {
+                val: s.to_string(),
+                attr: <Self as TypedAttribute>::NAME.to_string(),
+            });
         };
 
         let Ok(pt) = pt.parse::<u8>() else {
-            return Err(AttributeErr("Failed to parse payload type in rtpmap"));
+            return Err(AttributeError::InvalidParamValue {
+                param: "Payload type".to_string(),
+                val: pt.to_string(),
+                attr: <Self as TypedAttribute>::NAME.to_string(),
+            });
         };
 
         if pt > 127 {
-            return Err(AttributeErr("payload type value out of valid range(0-127)"));
+            return Err(AttributeError::InvalidParamValue {
+                param: "Payload type".to_string(),
+                val: format!("{pt}(expected 0-127)"),
+                attr: <Self as TypedAttribute>::NAME.to_string(),
+            });
         }
 
         let mut i = rest.splitn(3, '/');
         let Some(encoding) = i.next() else {
-            return Err(AttributeErr("Failed to get encoding name in the rtpmap"));
+            return Err(AttributeError::ParamNotFound {
+                param: "Encoding name".to_string(),
+                attr: <Self as TypedAttribute>::NAME.to_string(),
+            });
         };
 
         let Some(clock_rate) = i.next() else {
-            return Err(AttributeErr("Failed to get clock rate in the rtpmap"));
+            return Err(AttributeError::ParamNotFound {
+                param: "Clock rate".to_string(),
+                attr: <Self as TypedAttribute>::NAME.to_string(),
+            });
         };
 
         let Ok(clock_rate) = clock_rate.parse::<u32>() else {
-            return Err(AttributeErr("Failed to parse clock rate in rtpmap"));
+            return Err(AttributeError::InvalidParamValue {
+                param: "Clock rate".to_string(),
+                val: clock_rate.to_string(),
+                attr: <Self as TypedAttribute>::NAME.to_string(),
+            });
         };
 
         let params = i.next().map(String::from);
@@ -471,15 +492,22 @@ pub struct Fmtp {
 }
 
 impl FromStr for Fmtp {
-    type Err = AttributeErr;
+    type Err = AttributeError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let Some((fmt, rest)) = s.split_once(' ') else {
-            return Err(AttributeErr("Failed to split the format using a space"));
+            return Err(AttributeError::UnsupportedFormat {
+                val: s.to_string(),
+                attr: <Self as TypedAttribute>::NAME.to_string(),
+            });
         };
 
         let Ok(fmt) = fmt.parse::<u8>() else {
-            return Err(AttributeErr("Failed to parse format in fmtp"));
+            return Err(AttributeError::InvalidParamValue {
+                param: "fmtp".to_string(),
+                val: fmt.to_string(),
+                attr: <Self as TypedAttribute>::NAME.to_string(),
+            });
         };
 
         let mut params: Vec<FmtpParam> = Vec::new();
@@ -542,49 +570,76 @@ pub struct Rtcp {
 }
 
 impl FromStr for Rtcp {
-    type Err = AttributeErr;
+    type Err = AttributeError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut i = s.split(' ');
         let Some(port) = i.next() else {
-            return Err(AttributeErr(
-                "No values for rtcp attribute, failed to get port number",
-            ));
+            return Err(AttributeError::ParamNotFound {
+                param: "Port".to_string(),
+                attr: <Self as TypedAttribute>::NAME.to_string(),
+            });
         };
 
         let Ok(port) = port.parse::<u16>() else {
-            return Err(AttributeErr("Failed to parse port in rtcp"));
+            return Err(AttributeError::InvalidParamValue {
+                param: "Port".to_string(),
+                val: port.to_string(),
+                attr: <Self as TypedAttribute>::NAME.to_string(),
+            });
         };
 
         let Some(nettype) = i.next() else {
-            return Err(AttributeErr(
-                "No values for rtcp attribute, failed to get network type",
-            ));
+            return Err(AttributeError::ParamNotFound {
+                param: "Network type".to_string(),
+                attr: <Self as TypedAttribute>::NAME.to_string(),
+            });
         };
 
         let Ok(nettype) = NetType::from_str(nettype) else {
-            return Err(AttributeErr("Failed to parse network type in rtcp"));
+            return Err(AttributeError::InvalidParamValue {
+                param: "Network type".to_string(),
+                val: nettype.to_string(),
+                attr: <Self as TypedAttribute>::NAME.to_string(),
+            });
         };
 
         let Some(addrtype) = i.next() else {
-            return Err(AttributeErr(
-                "No values for rtcp attribute, failed to get address type",
-            ));
+            return Err(AttributeError::ParamNotFound {
+                param: "Address type".to_string(),
+                attr: <Self as TypedAttribute>::NAME.to_string(),
+            });
         };
 
         let Ok(addrtype) = AddrType::from_str(addrtype) else {
-            return Err(AttributeErr("Failed to parse address type in rtcp"));
+            return Err(AttributeError::InvalidParamValue {
+                param: "Address type".to_string(),
+                val: addrtype.to_string(),
+                attr: <Self as TypedAttribute>::NAME.to_string(),
+            });
         };
 
         let Some(connection_addr) = i.next() else {
-            return Err(AttributeErr(
-                "No values for rtcp attribute, failed to get connection address",
-            ));
+            return Err(AttributeError::ParamNotFound {
+                param: "Connection address".to_string(),
+                attr: <Self as TypedAttribute>::NAME.to_string(),
+            });
         };
 
         let Ok(connection_address) = connection_addr.parse() else {
-            return Err(AttributeErr("Failed to parse connection address in rtcp"));
+            return Err(AttributeError::InvalidParamValue {
+                param: "Connection address".to_string(),
+                val: connection_addr.to_string(),
+                attr: <Self as TypedAttribute>::NAME.to_string(),
+            });
         };
+
+        if let Some(unexpected) = i.next() {
+            return Err(AttributeError::UnexpectedTrailingItem {
+                val: unexpected.to_string(),
+                attr: <Self as TypedAttribute>::NAME.to_string(),
+            });
+        }
 
         Ok(Self {
             port,
@@ -688,6 +743,7 @@ pub enum RtcpFbPt {
     Wildcard,
 }
 
+#[derive(Debug, PartialEq, Clone)]
 /// RTCP Feedback Capability
 ///
 /// See [RFC 4585 Section 4.2](https://datatracker.ietf.org/doc/html/rfc4585#section-4.2)
@@ -699,14 +755,15 @@ pub struct RtcpFb {
 }
 
 impl FromStr for RtcpFb {
-    type Err = AttributeErr;
+    type Err = AttributeError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut i = s.split(' ');
         let Some(pt) = i.next() else {
-            return Err(AttributeErr(
-                "Failed to parse the RtcpFb, no payload format",
-            ));
+            return Err(AttributeError::ParamNotFound {
+                param: "Payload format".to_string(),
+                attr: <Self as TypedAttribute>::NAME.to_string(),
+            });
         };
 
         let pt = if let Ok(pt) = pt.parse::<u8>() {
@@ -714,13 +771,18 @@ impl FromStr for RtcpFb {
         } else if pt == "*" {
             RtcpFbPt::Wildcard
         } else {
-            return Err(AttributeErr(
-                "Failed to parse the RtcpFb, invalid values in the payload format",
-            ));
+            return Err(AttributeError::InvalidParamValue {
+                param: "Payload format".to_string(),
+                val: pt.to_string(),
+                attr: <Self as TypedAttribute>::NAME.to_string(),
+            });
         };
 
         let Some(val) = i.next() else {
-            return Err(AttributeErr("Failed to parse the RtcpFb, no Rtcp value"));
+            return Err(AttributeError::ParamNotFound {
+                param: "Rtcp feedback value".to_string(),
+                attr: <Self as TypedAttribute>::NAME.to_string(),
+            });
         };
 
         let rtcp_fb_val = match val {
@@ -738,8 +800,12 @@ impl FromStr for RtcpFb {
                         "ccfb" => {
                             // The payload type used with "ccfb" feedback MUST be the wildcard type
                             // See https://datatracker.ietf.org/doc/html/rfc8888#section-6
-                            if let RtcpFbPt::Fmt(_) = pt {
-                                return Err(AttributeErr("The payload type used with \"ccfb\" feedback is not wildcard type '*'"));
+                            if let RtcpFbPt::Fmt(pt) = pt {
+                                return Err(AttributeError::InvalidParamValue {
+                                    param: "Payload type".to_string(),
+                                    val: format!("{pt}(expected wildcard (*))"),
+                                    attr: <Self as TypedAttribute>::NAME.to_string(),
+                                });
                             } else {
                                 RtcpFbAck::Ccfb
                             }
@@ -775,11 +841,18 @@ impl FromStr for RtcpFb {
             "trr-int" => {
                 if let Some(val) = i.next() {
                     let Ok(i) = val.parse::<u64>() else {
-                        return Err(AttributeErr("Failed to parse trr-int value"));
+                        return Err(AttributeError::InvalidParamValue {
+                            param: "trr-int".to_string(),
+                            val: val.to_string(),
+                            attr: <Self as TypedAttribute>::NAME.to_string(),
+                        });
                     };
                     RtcpFbVal::TrrInt(i)
                 } else {
-                    return Err(AttributeErr("The trr-int has no value"));
+                    return Err(AttributeError::Other {
+                        error: "No trr-int value".to_string(),
+                        attr: <Self as TypedAttribute>::NAME.to_string(),
+                    });
                 }
             }
             "ccm" => {
@@ -798,7 +871,11 @@ impl FromStr for RtcpFb {
                             let mut v = vec![];
                             for vbcm_val in i {
                                 let Ok(p) = vbcm_val.parse::<u8>() else {
-                                    return Err(AttributeErr("Failed to parse vbcm value"));
+                                    return Err(AttributeError::InvalidParamValue {
+                                        param: "vbcm".to_string(),
+                                        val: vbcm_val.to_string(),
+                                        attr: <Self as TypedAttribute>::NAME.to_string(),
+                                    });
                                 };
                                 v.push(p);
                             }
@@ -808,7 +885,10 @@ impl FromStr for RtcpFb {
                     };
                     RtcpFbVal::Ccm(ccm_val)
                 } else {
-                    return Err(AttributeErr("Ccm param not available "));
+                    return Err(AttributeError::ParamNotFound {
+                        param: "Ccm param".to_string(),
+                        attr: <Self as TypedAttribute>::NAME.to_string(),
+                    });
                 }
             }
             other => RtcpFbVal::Other(other.to_string()),
@@ -969,28 +1049,34 @@ pub struct ExtMap {
 }
 
 impl FromStr for ExtMap {
-    type Err = AttributeErr;
+    type Err = AttributeError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut i = s.splitn(3, ' ');
 
         let Some(id_direction) = i.next() else {
-            return Err(AttributeErr(
-                "Failed to parse the ExtMap, id/direction not present",
-            ));
+            return Err(AttributeError::ParamNotFound {
+                param: "id/direction".to_string(),
+                attr: <Self as TypedAttribute>::NAME.to_string(),
+            });
         };
 
         let mut d = id_direction.split('/');
 
         let Some(id) = d.next() else {
-            return Err(AttributeErr("Failed to parse the ExtMap, id not present"));
+            return Err(AttributeError::ParamNotFound {
+                param: "id".to_string(),
+                attr: <Self as TypedAttribute>::NAME.to_string(),
+            });
         };
 
         let direction = if let Some(d) = d.next() {
             let Ok(dir) = Direction::from_str(d) else {
-                return Err(AttributeErr(
-                    "Failed to parse the ExtMap, invalid direction",
-                ));
+                return Err(AttributeError::InvalidParamValue {
+                    param: "Direction".to_string(),
+                    val: d.to_string(),
+                    attr: <Self as TypedAttribute>::NAME.to_string(),
+                });
             };
             Some(dir)
         } else {
@@ -998,13 +1084,18 @@ impl FromStr for ExtMap {
         };
 
         let Ok(id) = id.parse::<u8>() else {
-            return Err(AttributeErr(
-                "Failed to parse the ExtMap, invalid value for id",
-            ));
+            return Err(AttributeError::InvalidParamValue {
+                param: "Id".to_string(),
+                val: id.to_string(),
+                attr: <Self as TypedAttribute>::NAME.to_string(),
+            });
         };
 
         let Some(uri) = i.next() else {
-            return Err(AttributeErr("Failed to parse the ExtMap, no URI present"));
+            return Err(AttributeError::ParamNotFound {
+                param: "URI".to_string(),
+                attr: <Self as TypedAttribute>::NAME.to_string(),
+            });
         };
 
         let attributes = i.next().map(|attr| attr.to_string());
@@ -1062,7 +1153,7 @@ pub struct Fingerprint {
 }
 
 impl FromStr for Fingerprint {
-    type Err = AttributeErr;
+    type Err = AttributeError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut i = s.splitn(2, ' ');
@@ -1086,26 +1177,30 @@ impl FromStr for Fingerprint {
                 HashFunc::Other(hash_func.to_string())
             }
         } else {
-            return Err(AttributeErr(
-                "Failed to parse Fingerprint, hash function not found",
-            ));
+            return Err(AttributeError::ParamNotFound {
+                param: "Hash function".to_string(),
+                attr: <Self as TypedAttribute>::NAME.to_string(),
+            });
         };
 
         let mut fingerprint: Vec<u8> = vec![];
         if let Some(fp) = i.next() {
             for f in fp.split(':') {
                 let Ok(mut f) = hex::decode(f) else {
-                    return Err(AttributeErr(
-                        "Failed to parse Fingerprint, hash value is not hex",
-                    ));
+                    return Err(AttributeError::InvalidParamValue {
+                        param: "Hash function".to_string(),
+                        val: f.to_string(),
+                        attr: <Self as TypedAttribute>::NAME.to_string(),
+                    });
                 };
 
                 fingerprint.append(&mut f);
             }
         } else {
-            return Err(AttributeErr(
-                "Failed to parse Fingerprint, hash value not found",
-            ));
+            return Err(AttributeError::ParamNotFound {
+                param: "Hash value".to_string(),
+                attr: <Self as TypedAttribute>::NAME.to_string(),
+            });
         };
 
         Ok(Self {
@@ -1188,15 +1283,16 @@ pub struct Group {
 }
 
 impl FromStr for Group {
-    type Err = AttributeErr;
+    type Err = AttributeError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut i = s.split(' ');
 
         let Some(semantics) = i.next() else {
-            return Err(AttributeErr(
-                "Failed to parse Group, semantics not available",
-            ));
+            return Err(AttributeError::ParamNotFound {
+                param: "Semantics".to_string(),
+                attr: <Self as TypedAttribute>::NAME.to_string(),
+            });
         };
 
         let semantics = if "LS".eq_ignore_ascii_case(semantics) {
@@ -1221,9 +1317,10 @@ impl FromStr for Group {
         }
 
         if mid_tags.is_empty() {
-            return Err(AttributeErr(
-                "Failed to parse Group, media identification tags not available",
-            ));
+            return Err(AttributeError::ParamNotFound {
+                param: "Media identification tags".to_string(),
+                attr: <Self as TypedAttribute>::NAME.to_string(),
+            });
         }
 
         Ok(Self {
@@ -1273,7 +1370,7 @@ pub enum Setup {
 }
 
 impl FromStr for Setup {
-    type Err = AttributeErr;
+    type Err = AttributeError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if "active".eq_ignore_ascii_case(s) {
@@ -1285,7 +1382,10 @@ impl FromStr for Setup {
         } else if "holdconn".eq_ignore_ascii_case(s) {
             Ok(Setup::HoldConn)
         } else {
-            Err(AttributeErr("Invalid Setup value {s}"))
+            Err(AttributeError::Other {
+                error: format!("Invalid Setup value {s}"),
+                attr: <Self as TypedAttribute>::NAME.to_string(),
+            })
         }
     }
 }
@@ -1330,15 +1430,22 @@ pub struct Ssrc {
 }
 
 impl FromStr for Ssrc {
-    type Err = AttributeErr;
+    type Err = AttributeError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let Some((ssrc_id_str, rest)) = s.split_once(' ') else {
-            return Err(AttributeErr("Failed to parse Ssrc, no ssrc id"));
+            return Err(AttributeError::ParamNotFound {
+                param: "Ssrc id".to_string(),
+                attr: <Self as TypedAttribute>::NAME.to_string(),
+            });
         };
 
         let Ok(ssrc_id) = ssrc_id_str.parse::<u32>() else {
-            return Err(AttributeErr("Failed to parse Ssrc, invalid ssrc id"));
+            return Err(AttributeError::InvalidParamValue {
+                param: "Ssrc id".to_string(),
+                val: ssrc_id_str.to_string(),
+                attr: <Self as TypedAttribute>::NAME.to_string(),
+            });
         };
 
         let (attr, value) = if let Some((attr_str, value)) = rest.split_once(':') {
@@ -1392,21 +1499,23 @@ impl TypedAttribute for Ssrc {
 /// SSRC group attribute
 ///
 /// See [RFC 5576 Section 4.2](https://tools.ietf.org/html/rfc5576#section-4.2)
+#[derive(Debug, PartialEq, Clone)]
 pub struct SsrcGroup {
     pub semantics: GroupSemantics,
     pub ssrc_ids: Vec<u32>,
 }
 
 impl FromStr for SsrcGroup {
-    type Err = AttributeErr;
+    type Err = AttributeError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut i = s.split(' ');
 
         let Some(semantics) = i.next() else {
-            return Err(AttributeErr(
-                "Failed to parse SsrcGroup, semantics not available",
-            ));
+            return Err(AttributeError::ParamNotFound {
+                param: "Semantics".to_string(),
+                attr: <Self as TypedAttribute>::NAME.to_string(),
+            });
         };
 
         let semantics = if "FEC".eq_ignore_ascii_case(semantics) {
@@ -1423,7 +1532,11 @@ impl FromStr for SsrcGroup {
         let mut ssrc_ids = vec![];
         for ssrc_id in i {
             let Ok(ssrc_id) = ssrc_id.parse::<u32>() else {
-                return Err(AttributeErr("Failed to parse SsrcGroup, invalid ssrc id"));
+                return Err(AttributeError::InvalidParamValue {
+                    param: "Ssrc id".to_string(),
+                    val: ssrc_id.to_string(),
+                    attr: <Self as TypedAttribute>::NAME.to_string(),
+                });
             };
             ssrc_ids.push(ssrc_id);
         }
@@ -1492,20 +1605,25 @@ pub struct SrtpKeyParam {
 }
 
 impl FromStr for SrtpKeyParam {
-    type Err = AttributeErr;
+    type Err = AttributeError;
     fn from_str(key_param: &str) -> Result<Self, Self::Err> {
         let mut k = key_param.split('|');
 
         let Some(key_and_salt_with_method) = k.next() else {
-            return Err(AttributeErr("Failed to parse key and salt"));
+            return Err(AttributeError::ParamNotFound {
+                param: "Srtp Key and Salt".to_string(),
+                attr: Crypto::NAME.to_string(),
+            });
         };
 
         let key_and_salt = if key_and_salt_with_method.get(..7).map_or(false, |p| p.eq_ignore_ascii_case("inline:")) {
             &key_and_salt_with_method[7..]
         } else {
-            return Err(AttributeErr(
-                "Failed to strip the key method (inline:) from the key parameter",
-            ));
+            return Err(AttributeError::InvalidParamValue {
+                param: "Strp Key and Salt".to_string(),
+                val: key_and_salt_with_method.to_string(),
+                attr: Crypto::NAME.to_string(),
+            });
         };
 
         let (lifetime, mki_and_length) = if let Some(next_param) = k.next() {
@@ -1513,11 +1631,19 @@ impl FromStr for SrtpKeyParam {
                 Some(mki_and_length) => {
                     // lifetime is not specified, but only MKI and its length
                     let Ok(mki) = mki_and_length.0.parse::<u32>() else {
-                        return Err(AttributeErr("Failed to parse MKI value"));
+                        return Err(AttributeError::InvalidParamValue {
+                            param: "MKI".to_string(),
+                            val: next_param.to_string(),
+                            attr: Crypto::NAME.to_string(),
+                        });
                     };
 
                     let Ok(len) = mki_and_length.1.parse::<u32>() else {
-                        return Err(AttributeErr("Failed to parse MKI length"));
+                        return Err(AttributeError::InvalidParamValue {
+                            param: "Length".to_string(),
+                            val: next_param.to_string(),
+                            attr: Crypto::NAME.to_string(),
+                        });
                     };
                     (None, Some((mki, len)))
                 }
@@ -1526,17 +1652,29 @@ impl FromStr for SrtpKeyParam {
                     let lifetime = match next_param.strip_prefix("2^") {
                         Some(exp) => {
                             let Ok(exp) = exp.parse::<u32>() else {
-                                return Err(AttributeErr("Failed to parse lifetime exponent"));
+                                return Err(AttributeError::InvalidParamValue {
+                                    param: "Lifetime".to_string(),
+                                    val: next_param.to_string(),
+                                    attr: Crypto::NAME.to_string(),
+                                });
                             };
                             // 2u32.pow(exp) panics for exp >= 32
                             if exp >= 32 {
-                                return Err(AttributeErr("Lifetime exponent too large"));
+                                return Err(AttributeError::InvalidParamValue {
+                                    param: "Lifetime".to_string(),
+                                    val: format!("{exp}(expected 0-32)"),
+                                    attr: Crypto::NAME.to_string(),
+                                });
                             }
                             Some(2u32.pow(exp))
                         }
                         None => {
                             let Ok(lifetime) = next_param.parse::<u32>() else {
-                                return Err(AttributeErr("Failed to parse lifetime value"));
+                                return Err(AttributeError::InvalidParamValue {
+                                    param: "Lifetime".to_string(),
+                                    val: next_param.to_string(),
+                                    attr: Crypto::NAME.to_string(),
+                                });
                             };
                             Some(lifetime)
                         }
@@ -1546,15 +1684,26 @@ impl FromStr for SrtpKeyParam {
                     let mki_and_length = if let Some(m) = k.next() {
                         if let Some(p) = m.split_once(':') {
                             let Ok(mki) = p.0.parse::<u32>() else {
-                                return Err(AttributeErr("Failed to parse MKI value"));
+                                return Err(AttributeError::InvalidParamValue {
+                                    param: "MKI".to_string(),
+                                    val: m.to_string(),
+                                    attr: Crypto::NAME.to_string(),
+                                });
                             };
 
                             let Ok(len) = p.1.parse::<u32>() else {
-                                return Err(AttributeErr("Failed to parse MKI length"));
+                                return Err(AttributeError::InvalidParamValue {
+                                    param: "Length".to_string(),
+                                    val: m.to_string(),
+                                    attr: Crypto::NAME.to_string(),
+                                });
                             };
                             Some((mki, len))
                         } else {
-                            return Err(AttributeErr("Failed to parse MKI and Length"));
+                            return Err(AttributeError::ParamNotFound {
+                                param: "MKI and Length".to_string(),
+                                attr: Crypto::NAME.to_string(),
+                            });
                         }
                     } else {
                         None
@@ -1569,8 +1718,19 @@ impl FromStr for SrtpKeyParam {
 
         if let Some((_, len)) = mki_and_length {
             if !(1..=128).contains(&len) {
-                return Err(AttributeErr("MKI length outside the range 1-128"));
+                return Err(AttributeError::InvalidParamValue {
+                    param: "MKI length".to_string(),
+                    val: len.to_string(),
+                    attr: Crypto::NAME.to_string(),
+                });
             }
+        }
+
+        if let Some(unexpected) = k.next() {
+            return Err(AttributeError::UnexpectedTrailingItem {
+                val: unexpected.to_string(),
+                attr: Crypto::NAME.to_string(),
+            });
         }
 
         Ok(Self {
@@ -1659,23 +1819,31 @@ pub struct Crypto {
 }
 
 impl FromStr for Crypto {
-    type Err = AttributeErr;
+    type Err = AttributeError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut i = s.split(' ');
 
         let Some(tag) = i.next() else {
-            return Err(AttributeErr("Failed to parse Crypto, Tag not available"));
+            return Err(AttributeError::ParamNotFound {
+                param: "Tag".to_string(),
+                attr: <Self as TypedAttribute>::NAME.to_string(),
+            });
         };
 
         let Ok(tag) = tag.parse::<u32>() else {
-            return Err(AttributeErr("Failed to parse tag, not a u32"));
+            return Err(AttributeError::InvalidParamValue {
+                param: "Tag".to_string(),
+                val: tag.to_string(),
+                attr: <Self as TypedAttribute>::NAME.to_string(),
+            });
         };
 
         let Some(crypto_suite) = i.next() else {
-            return Err(AttributeErr(
-                "Failed to parse Crypto, CryptoSuite not available",
-            ));
+            return Err(AttributeError::ParamNotFound {
+                param: "CryptoSuite".to_string(),
+                attr: <Self as TypedAttribute>::NAME.to_string(),
+            });
         };
 
         let crypto_suite = if "AES_CM_128_HMAC_SHA1_32".eq_ignore_ascii_case(crypto_suite) {
@@ -1689,17 +1857,17 @@ impl FromStr for Crypto {
         };
 
         let Some(key_params_str) = i.next() else {
-            return Err(AttributeErr(
-                "Failed to parse Crypto, Key params not available",
-            ));
+            return Err(AttributeError::ParamNotFound {
+                param: "Key params".to_string(),
+                attr: <Self as TypedAttribute>::NAME.to_string(),
+            });
         };
 
         let mut key_params: Vec<SrtpKeyParam> = Vec::new();
 
         for key_param in key_params_str.split(';') {
-            if let Ok(key_param) = SrtpKeyParam::from_str(key_param) {
-                key_params.push(key_param);
-            }
+            let key_param = SrtpKeyParam::from_str(key_param)?;
+            key_params.push(key_param);
         }
 
         let mut session_params: Vec<SrtpSessionParam> = Vec::new();
@@ -1707,9 +1875,11 @@ impl FromStr for Crypto {
             let s = s.to_ascii_uppercase();
             let param = if let Some(kdr_val) = s.strip_prefix("KDR=") {
                 let Ok(kdr_val) = kdr_val.parse::<u8>() else {
-                    return Err(AttributeErr(
-                        "Failed to parse KDR value in Crypto attribute",
-                    ));
+                    return Err(AttributeError::InvalidParamValue {
+                        param: "KDR".to_string(),
+                        val: kdr_val.to_string(),
+                        attr: <Self as TypedAttribute>::NAME.to_string(),
+                    });
                 };
 
                 // Note: the range for KDR value is conflicting in the spec,
@@ -1717,7 +1887,11 @@ impl FromStr for Crypto {
                 // the grammar in rfc4568#section-9.2 says it should be 0..24.
                 // So using the bigger range i.e., 0..24 for now
                 if !(0..=24).contains(&kdr_val) {
-                    return Err(AttributeErr("KDR value invalid, out of range 0-24"));
+                    return Err(AttributeError::InvalidParamValue {
+                        param: "KDR".to_string(),
+                        val: format!("{kdr_val}(expected range 0..24)"),
+                        attr: <Self as TypedAttribute>::NAME.to_string(),
+                    });
                 }
                 SrtpSessionParam::Kdr(kdr_val)
             } else if s == "UNENCRYPTED_SRTCP" {
@@ -1732,28 +1906,35 @@ impl FromStr for Crypto {
                 } else if fec_ord.eq_ignore_ascii_case("SRTP_FEC") {
                     SrtpSessionParam::FecOrder(FecOrder::SrtpFec)
                 } else {
-                    return Err(AttributeErr(
-                        "Error parsing Crypto attribute, FEC order invalid",
-                    ));
+                    return Err(AttributeError::InvalidParamValue {
+                        param: "FEC order".to_string(),
+                        val: s.to_string(),
+                        attr: <Self as TypedAttribute>::NAME.to_string(),
+                    });
                 }
             } else if let Some(key_params_str) = s.strip_prefix("FEC_KEY=") {
                 let mut key_params: Vec<SrtpKeyParam> = Vec::new();
 
                 for key_param in key_params_str.split(';') {
-                    if let Ok(key_param) = SrtpKeyParam::from_str(key_param) {
-                        key_params.push(key_param);
-                    }
+                    let key_param = SrtpKeyParam::from_str(key_param)?;
+                    key_params.push(key_param);
                 }
                 SrtpSessionParam::FecKey(key_params)
             } else if let Some(wsh_val) = s.strip_prefix("WSH=") {
                 let Ok(wsh_val) = wsh_val.parse::<u8>() else {
-                    return Err(AttributeErr(
-                        "Failed to parse WSH value in Crypto attribute",
-                    ));
+                    return Err(AttributeError::InvalidParamValue {
+                        param: "WSH".to_string(),
+                        val: wsh_val.to_string(),
+                        attr: <Self as TypedAttribute>::NAME.to_string(),
+                    });
                 };
 
                 if wsh_val < 64 {
-                    return Err(AttributeErr("WSH value invalid, less than 64"));
+                    return Err(AttributeError::InvalidParamValue {
+                        param: "WSH".to_string(),
+                        val: wsh_val.to_string(),
+                        attr: <Self as TypedAttribute>::NAME.to_string(),
+                    });
                 }
                 SrtpSessionParam::Wsh(wsh_val)
             } else {
@@ -1823,6 +2004,281 @@ impl Display for Crypto {
 
 impl TypedAttribute for Crypto {
     const NAME: &'static str = "crypto";
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum CandidateType {
+    /// Host
+    Host,
+    /// Server-reflexive
+    Srflx,
+    /// Peer-reflexive
+    Prflx,
+    /// Relay
+    Relay,
+    /// Unknown type
+    Other(String),
+}
+
+/// Candidate connection address type
+///
+/// Can be IPv4, IPv6 or a FQDN
+#[derive(Debug, PartialEq, Clone)]
+pub enum CandidateAddress {
+    IpAddr(IpAddr),
+    FQDN(String),
+}
+
+/// ICE Candidate attribute of the media
+///
+/// See [RFC 8839 Section 5.1](https://datatracker.ietf.org/doc/html/rfc8839#section-5.1)
+#[derive(Debug, PartialEq, Clone)]
+pub struct Candidate {
+    /// Arbitrary string used in the freezing algorithm to group similar candidates
+    /// See [RFC 8445 Section 5.1.1.3](https://datatracker.ietf.org/doc/html/rfc8445#section-5.1.1.3)
+    pub foundation: String,
+    /// Identifies the specific component of the data stream
+    /// 1 for RTP and 2 for RTCP
+    pub component_id: u32,
+    /// Transport protocol of the candidate
+    pub transport: String,
+    /// Candidate's priority
+    pub priority: u64,
+    /// IP address of the candidate
+    /// IPv4, IPv6 addresses and FQDN allowed
+    pub address: CandidateAddress,
+    /// Port of the candidate
+    pub port: u16,
+    /// Type of the candidate
+    pub typ: CandidateType,
+    /// Address related to the candidate
+    /// Required for srflx, prflx and relay type candidates
+    pub rel_addr: Option<IpAddr>,
+    /// Port related to the candidate
+    /// Required for srflx, prflx and relay type candidates
+    pub rel_port: Option<u16>,
+    /// Extensions
+    pub extensions: Vec<(String, String)>,
+}
+
+impl FromStr for Candidate {
+    type Err = AttributeError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut i = s.split(' ');
+
+        let Some(foundation) = i.next() else {
+            return Err(AttributeError::ParamNotFound {
+                param: "Foundation".to_string(),
+                attr: <Self as TypedAttribute>::NAME.to_string(),
+            });
+        };
+
+        let Some(comp_id) = i.next() else {
+            return Err(AttributeError::ParamNotFound {
+                param: "Component id".to_string(),
+                attr: <Self as TypedAttribute>::NAME.to_string(),
+            });
+        };
+
+        let Ok(comp_id) = comp_id.parse::<u32>() else {
+            return Err(AttributeError::InvalidParamValue {
+                param: "Component id".to_string(),
+                val: comp_id.to_string(),
+                attr: <Self as TypedAttribute>::NAME.to_string(),
+            });
+        };
+
+        let Some(transport) = i.next() else {
+            return Err(AttributeError::ParamNotFound {
+                param: "Transport".to_string(),
+                attr: <Self as TypedAttribute>::NAME.to_string(),
+            });
+        };
+
+        let Some(priority) = i.next() else {
+            return Err(AttributeError::ParamNotFound {
+                param: "Priority".to_string(),
+                attr: <Self as TypedAttribute>::NAME.to_string(),
+            });
+        };
+
+        let Ok(priority) = priority.parse::<u64>() else {
+            return Err(AttributeError::InvalidParamValue {
+                param: "Priority".to_string(),
+                val: priority.to_string(),
+                attr: <Self as TypedAttribute>::NAME.to_string(),
+            });
+        };
+
+        let Some(address) = i.next() else {
+            return Err(AttributeError::ParamNotFound {
+                param: "Address".to_string(),
+                attr: <Self as TypedAttribute>::NAME.to_string(),
+            });
+        };
+
+        let address = match address.parse::<IpAddr>() {
+            Ok(a) => CandidateAddress::IpAddr(a),
+            Err(_) => CandidateAddress::FQDN(address.to_string()),
+        };
+
+        let Some(port) = i.next() else {
+            return Err(AttributeError::ParamNotFound {
+                param: "Port".to_string(),
+                attr: <Self as TypedAttribute>::NAME.to_string(),
+            });
+        };
+
+        let Ok(port) = port.parse::<u16>() else {
+            return Err(AttributeError::InvalidParamValue {
+                param: "Port".to_string(),
+                val: port.to_string(),
+                attr: <Self as TypedAttribute>::NAME.to_string(),
+            });
+        };
+
+        let Some(typ_str) = i.next() else {
+            return Err(AttributeError::ParamNotFound {
+                param: "'typ' string".to_string(),
+                attr: <Self as TypedAttribute>::NAME.to_string(),
+            });
+        };
+
+        if !typ_str.eq_ignore_ascii_case("typ") {
+            return Err(AttributeError::ParamNotFound {
+                param: "'typ' string".to_string(),
+                attr: <Self as TypedAttribute>::NAME.to_string(),
+            });
+        };
+
+        let Some(cand_type) = i.next() else {
+            return Err(AttributeError::ParamNotFound {
+                param: "Candidate type".to_string(),
+                attr: <Self as TypedAttribute>::NAME.to_string(),
+            });
+        };
+
+        let cand_type = if "host".eq_ignore_ascii_case(cand_type) {
+            CandidateType::Host
+        } else if "srflx".eq_ignore_ascii_case(cand_type) {
+            CandidateType::Srflx
+        } else if "prflx".eq_ignore_ascii_case(cand_type) {
+            CandidateType::Prflx
+        } else if "relay".eq_ignore_ascii_case(cand_type) {
+            CandidateType::Relay
+        } else {
+            CandidateType::Other(cand_type.to_string())
+        };
+
+        let mut rel_addr: Option<IpAddr> = None;
+        let mut rel_port: Option<u16> = None;
+        let mut exts: Vec<(String, String)> = Vec::new();
+
+        while let Some(key) = i.next() {
+            if key.eq_ignore_ascii_case("raddr") {
+                let Some(raddr) = i.next() else {
+                    return Err(AttributeError::ParamNotFound {
+                        param: "Relative address".to_string(),
+                        attr: <Self as TypedAttribute>::NAME.to_string(),
+                    });
+                };
+
+                if let Ok(raddr) = raddr.parse::<IpAddr>() {
+                    rel_addr = Some(raddr);
+                } else {
+                    return Err(AttributeError::InvalidParamValue {
+                        param: "Relative address".to_string(),
+                        val: raddr.to_string(),
+                        attr: <Self as TypedAttribute>::NAME.to_string(),
+                    });
+                };
+            } else if key.eq_ignore_ascii_case("rport") {
+                let Some(rport) = i.next() else {
+                    return Err(AttributeError::ParamNotFound {
+                        param: "Relative port".to_string(),
+                        attr: <Self as TypedAttribute>::NAME.to_string(),
+                    });
+                };
+
+                if let Ok(rport) = rport.parse::<u16>() {
+                    rel_port = Some(rport);
+                } else {
+                    return Err(AttributeError::InvalidParamValue {
+                        param: "Relative port".to_string(),
+                        val: rport.to_string(),
+                        attr: <Self as TypedAttribute>::NAME.to_string(),
+                    });
+                }
+            } else {
+                let Some(val) = i.next() else {
+                    return Err(AttributeError::Other {
+                        error: format!("No val for the extension {key}"),
+                        attr: <Self as TypedAttribute>::NAME.to_string(),
+                    });
+                };
+
+                exts.push((key.to_string(), val.to_string()));
+            }
+        }
+
+        Ok(Self {
+            foundation: foundation.to_string(),
+            component_id: comp_id,
+            transport: transport.to_string(),
+            priority,
+            address,
+            port,
+            typ: cand_type,
+            rel_addr,
+            rel_port,
+            extensions: exts,
+        })
+    }
+}
+
+impl Display for Candidate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let typ = match &self.typ {
+            CandidateType::Host => "host".to_string(),
+            CandidateType::Srflx => "srflx".to_string(),
+            CandidateType::Prflx => "prflx".to_string(),
+            CandidateType::Relay => "relay".to_string(),
+            CandidateType::Other(o) => o.clone(),
+        };
+
+        let candidate_addr = match &self.address {
+            CandidateAddress::IpAddr(a) => a.to_string(),
+            CandidateAddress::FQDN(d) => d.clone(),
+        };
+
+        let mut s = format!(
+            "{} {} {} {} {} {} typ {typ}",
+            self.foundation,
+            self.component_id,
+            self.transport,
+            self.priority,
+            candidate_addr,
+            self.port
+        );
+
+        if let Some(rel_addr) = self.rel_addr {
+            s += format!(" raddr {rel_addr}").as_str();
+        }
+        if let Some(rel_port) = self.rel_port {
+            s += format!(" rport {rel_port}").as_str();
+        }
+
+        for (key, val) in &self.extensions {
+            s += format!(" {key} {val}").as_str();
+        }
+
+        f.write_str(&s)
+    }
+}
+
+impl TypedAttribute for Candidate {
+    const NAME: &'static str = "candidate";
 }
 
 /// Originator of the session.
@@ -2013,16 +2469,30 @@ impl std::fmt::Display for AttributeNotFoundError {
 }
 
 /// Attribute error with specific details
-// TODO: combine this and AttributeNotFoundError?
-#[derive(Debug, PartialEq, Eq)]
-pub struct AttributeErr(&'static str);
-
-impl std::error::Error for AttributeErr {}
-
-impl std::fmt::Display for AttributeErr {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(f, "{}", self.0)
-    }
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+pub enum AttributeError {
+    /// If an Attribute is not found in a media or the session
+    #[error("Attribute {} not found", .0)]
+    NotFound(String),
+    /// If a parameter is missing in an attribute
+    #[error("Param {} not found in {}", .param, .attr)]
+    ParamNotFound { param: String, attr: String },
+    /// If a parameter value is not valid type or not in range
+    #[error("Invalid value {} for Param {} in {}", .val ,.param, .attr)]
+    InvalidParamValue {
+        param: String,
+        val: String,
+        attr: String,
+    },
+    /// If an attribute is not in not in expected format
+    #[error("Unsupported attribute format: {} for {}", .val, .attr)]
+    UnsupportedFormat { val: String, attr: String },
+    /// If there are more than expected items trailing in the attribute parameters
+    #[error("Unexpected trailing item {} for in {}", .val, .attr)]
+    UnexpectedTrailingItem { val: String, attr: String },
+    /// Unspecified error
+    #[error("{}: {}", .attr, .error)]
+    Other { error: String, attr: String },
 }
 
 impl Media {
@@ -2087,19 +2557,22 @@ impl Media {
 
     /// Gets an iterator over all attribute values of the given name.
     ///
-    /// Each item is a `Result` with the inferred type in `Ok` and `AttributeErr` in `Err`.
+    /// Each item is a `Result` with the inferred type in `Ok` and `AttributeError` in `Err`.
     ///
     /// The iterator does not terminate upon an error item; continues with the next attribute
     pub fn attributes_typed<'a, T: TypedAttribute>(
         &'a self,
-    ) -> impl Iterator<Item = Result<T, AttributeErr>> + 'a {
+    ) -> impl Iterator<Item = Result<T, AttributeError>> + 'a {
         self.attributes
             .iter()
             .filter(move |a| a.attribute.eq_ignore_ascii_case(T::NAME))
             .map(|a| {
                 let Some(s) = &a.value else {
                     // does not have a value for the attribute
-                    return Err(AttributeErr("No value for the attribute"));
+                    return Err(AttributeError::Other {
+                        error: "No value for the attribute".to_string(),
+                        attr: T::NAME.to_string(),
+                    });
                 };
 
                 T::from_str(s)
@@ -2145,19 +2618,22 @@ impl Session {
 
     /// Gets an iterator over all attribute values of the given name.
     ///
-    /// Each item is a `Result` with the inferred type in `Ok` and `AttributeErr` in `Err`.
+    /// Each item is a `Result` with the inferred type in `Ok` and `AttributeError` in `Err`.
     ///
     /// The iterator does not terminate upon an error item; continues with the next attribute
     pub fn attributes_typed<'a, T: TypedAttribute>(
         &'a self,
-    ) -> impl Iterator<Item = Result<T, AttributeErr>> + 'a {
+    ) -> impl Iterator<Item = Result<T, AttributeError>> + 'a {
         self.attributes
             .iter()
             .filter(move |a| a.attribute.eq_ignore_ascii_case(T::NAME))
             .map(|a| {
                 let Some(s) = &a.value else {
                     // does not have a value for the attribute
-                    return Err(AttributeErr("No value for the attribute"));
+                    return Err(AttributeError::Other {
+                        error: "No value for the attribute".to_string(),
+                        attr: T::NAME.to_string(),
+                    });
                 };
 
                 T::from_str(s)
@@ -2441,7 +2917,7 @@ a=extmap:2/sendrecv http://example.com/082005/ext.htm#xmeta short\r
 
         let v = media
             .attributes_typed::<RtpMap>()
-            .collect::<Vec<Result<RtpMap, AttributeErr>>>();
+            .collect::<Vec<Result<RtpMap, AttributeError>>>();
         assert_eq!(v[0].as_ref().unwrap().clock_rate, 90000);
         assert_eq!(v[1].as_ref().unwrap().encoding_name, "h264");
         assert_eq!(v[2], Err(AttributeErr("No value for the attribute")));
@@ -2825,6 +3301,352 @@ a=crypto:1 AES_CM_128_HMAC_SHA1_80 inline:YUJDZGVmZ2hpSktMbW9QUXJzVHVWd3l6MTIzND
         assert_eq!(
             crypto.to_string(),
             "1 AES_CM_128_HMAC_SHA1_80 inline:WVNfX19zZW1jdGwgKCkgewkyMjA7fQp9CnVubGVz|2^20|1:4;inline:WVNfX19zZW1jdGwgKCkgewkyMjA7fQp9CnVubGVz|2^20|1:4 FEC_ORDER=SRTP_FEC"
+        );
+    }
+
+    #[test]
+    fn parse_candidate_attributes() {
+        use std::net::{Ipv4Addr, Ipv6Addr};
+
+        let sdp = "v=0\r
+o=- 2890844526 2890842807 IN IP4 192.168.1.1\r
+s=-\r
+c=IN IP4 192.168.1.1\r
+t=0 0\r
+m=audio 49152 RTP/AVP 0\r
+a=candidate:1 1 UDP 2130706432 192.168.1.1 49152 typ host raddr 10.0.1.1 rport 49153 generation 0\r
+a=candidate:2 1 UDP 1692467200 10.0.1.1 49152 typ srflx raddr 192.168.1.1 rport 49153\r
+a=candidate:3 2 UDP 1692467184 192.168.1.1 49153 typ host\r
+a=candidate:4 1 UDP 100 2001:db8::1 49152 typ host\r
+a=candidate:5 1 UDP 50 192.168.1.1 49154 typ prflx\r
+a=candidate:6 1 UDP 25 192.168.1.1 49155 typ relay raddr 10.0.0.1 rport 49156\r
+a=candidate:7 1 UDP 10 192.168.1.1 49157 typ unknown_type\r
+";
+
+        let session = Session::parse(sdp.as_bytes()).unwrap();
+        let candidates: Vec<Candidate> =
+            fallible_iterator::convert(session.medias[0].attributes_typed::<Candidate>())
+                .collect::<Vec<_>>()
+                .expect("Valid vector of candidates");
+
+        assert_eq!(candidates.len(), 7);
+
+        assert_eq!(candidates[0].foundation, "1");
+        assert_eq!(candidates[0].component_id, 1);
+        assert_eq!(
+            candidates[0].address,
+            CandidateAddress::IpAddr(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)))
+        );
+        assert_eq!(candidates[0].port, 49152);
+        assert_eq!(candidates[0].typ, CandidateType::Host);
+        assert_eq!(
+            candidates[0].rel_addr,
+            Some(IpAddr::V4(Ipv4Addr::new(10, 0, 1, 1)))
+        );
+        assert_eq!(candidates[0].rel_port, Some(49153));
+        assert_eq!(
+            candidates[0].extensions,
+            vec![("generation".to_string(), "0".to_string())]
+        );
+
+        assert_eq!(candidates[1].foundation, "2");
+        assert_eq!(candidates[1].typ, CandidateType::Srflx);
+        assert_eq!(
+            candidates[1].rel_addr,
+            Some(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)))
+        );
+        assert_eq!(candidates[1].rel_port, Some(49153));
+
+        assert_eq!(candidates[2].foundation, "3");
+        assert_eq!(candidates[2].component_id, 2);
+        assert_eq!(candidates[2].typ, CandidateType::Host);
+
+        assert_eq!(candidates[3].foundation, "4");
+        assert_eq!(
+            candidates[3].address,
+            CandidateAddress::IpAddr(IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1)))
+        );
+        assert_eq!(candidates[3].typ, CandidateType::Host);
+
+        assert_eq!(candidates[4].foundation, "5");
+        assert_eq!(candidates[4].typ, CandidateType::Prflx);
+
+        assert_eq!(candidates[5].foundation, "6");
+        assert_eq!(candidates[5].typ, CandidateType::Relay);
+
+        assert_eq!(candidates[6].foundation, "7");
+        assert_eq!(
+            candidates[6].typ,
+            CandidateType::Other("unknown_type".to_string())
+        );
+    }
+
+    #[test]
+    fn write_candidate() {
+        use std::net::Ipv4Addr;
+
+        let candidate = Candidate {
+            foundation: "abcd/1234".into(),
+            component_id: 1,
+            transport: "UDP".into(),
+            priority: 2130706432,
+            address: CandidateAddress::IpAddr(IpAddr::V4(Ipv4Addr::new(192, 168, 0, 1))),
+            port: 49152,
+            typ: CandidateType::Srflx,
+            rel_addr: Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))),
+            rel_port: Some(49153),
+            extensions: vec![("tcptype".to_string(), "active".to_string())],
+        };
+
+        assert_eq!(
+            candidate.to_string(),
+            "abcd/1234 1 UDP 2130706432 192.168.0.1 49152 typ srflx raddr 10.0.0.1 rport 49153 tcptype active"
+        );
+    }
+
+    #[test]
+    fn test_attribute_errors() {
+        // Test RtpMap error paths
+        assert_eq!(
+            "99".parse::<RtpMap>().unwrap_err(),
+            AttributeError::UnsupportedFormat {
+                val: "99".to_string(),
+                attr: "rtpmap".to_string()
+            }
+        );
+        assert_eq!(
+            "abc 90000".parse::<RtpMap>().unwrap_err(),
+            AttributeError::InvalidParamValue {
+                param: "Payload type".to_string(),
+                val: "abc".to_string(),
+                attr: "rtpmap".to_string()
+            }
+        );
+        assert_eq!(
+            "200 enc/90000".parse::<RtpMap>().unwrap_err(),
+            AttributeError::InvalidParamValue {
+                param: "Payload type".to_string(),
+                val: "200(expected 0-127)".to_string(),
+                attr: "rtpmap".to_string()
+            }
+        );
+        assert_eq!(
+            "99 ".parse::<RtpMap>().unwrap_err(),
+            AttributeError::ParamNotFound {
+                param: "Clock rate".to_string(),
+                attr: "rtpmap".to_string()
+            }
+        );
+        assert_eq!(
+            "99 /".parse::<RtpMap>().unwrap_err(),
+            AttributeError::InvalidParamValue {
+                param: "Clock rate".to_string(),
+                val: "".to_string(),
+                attr: "rtpmap".to_string()
+            }
+        );
+
+        // Test Fmtp error paths
+        assert_eq!(
+            "invalid".parse::<Fmtp>().unwrap_err(),
+            AttributeError::UnsupportedFormat {
+                val: "invalid".to_string(),
+                attr: "fmtp".to_string()
+            }
+        );
+        assert_eq!(
+            "abc profile=1".parse::<Fmtp>().unwrap_err(),
+            AttributeError::InvalidParamValue {
+                param: "fmtp".to_string(),
+                val: "abc".to_string(),
+                attr: "fmtp".to_string()
+            }
+        );
+
+        // Test Rtcp error paths
+        assert_eq!(
+            "".parse::<Rtcp>().unwrap_err(),
+            AttributeError::InvalidParamValue {
+                param: "Port".to_string(),
+                val: "".to_string(),
+                attr: "rtcp".to_string()
+            }
+        );
+        assert_eq!(
+            "abc IN IP4 127.0.0.1".parse::<Rtcp>().unwrap_err(),
+            AttributeError::InvalidParamValue {
+                param: "Port".to_string(),
+                val: "abc".to_string(),
+                attr: "rtcp".to_string()
+            }
+        );
+        assert_eq!(
+            "53020 invalid IP4 127.0.0.1".parse::<Rtcp>().unwrap_err(),
+            AttributeError::InvalidParamValue {
+                param: "Network type".to_string(),
+                val: "invalid".to_string(),
+                attr: "rtcp".to_string()
+            }
+        );
+
+        // Test Fingerprint error paths
+        assert_eq!(
+            "".parse::<Fingerprint>().unwrap_err(),
+            AttributeError::ParamNotFound {
+                param: "Hash value".to_string(),
+                attr: "fingerprint".to_string()
+            }
+        );
+        assert_eq!(
+            "SHA-1".parse::<Fingerprint>().unwrap_err(),
+            AttributeError::ParamNotFound {
+                param: "Hash value".to_string(),
+                attr: "fingerprint".to_string()
+            }
+        );
+
+        // Test Candidate error paths
+        assert_eq!(
+            "".parse::<Candidate>().unwrap_err(),
+            AttributeError::ParamNotFound {
+                param: "Component id".to_string(),
+                attr: "candidate".to_string()
+            }
+        );
+        assert_eq!(
+            "1 1 UDP 100".parse::<Candidate>().unwrap_err(),
+            AttributeError::ParamNotFound {
+                param: "Address".to_string(),
+                attr: "candidate".to_string()
+            }
+        );
+
+        // Test ExtMap error paths
+        assert_eq!(
+            "".parse::<ExtMap>().unwrap_err(),
+            AttributeError::InvalidParamValue {
+                param: "Id".to_string(),
+                val: "".to_string(),
+                attr: "extmap".to_string()
+            }
+        );
+        assert_eq!(
+            "999999 http://example.com".parse::<ExtMap>().unwrap_err(),
+            AttributeError::InvalidParamValue {
+                param: "Id".to_string(),
+                val: "999999".to_string(),
+                attr: "extmap".to_string()
+            }
+        );
+
+        // Test Group error paths
+        assert_eq!(
+            "".parse::<Group>().unwrap_err(),
+            AttributeError::ParamNotFound {
+                param: "Media identification tags".to_string(),
+                attr: "group".to_string()
+            }
+        );
+        assert_eq!(
+            "LS".parse::<Group>().unwrap_err(),
+            AttributeError::ParamNotFound {
+                param: "Media identification tags".to_string(),
+                attr: "group".to_string()
+            }
+        );
+
+        // Test Ssrc error paths
+        assert_eq!(
+            "".parse::<Ssrc>().unwrap_err(),
+            AttributeError::ParamNotFound {
+                param: "Ssrc id".to_string(),
+                attr: "ssrc".to_string()
+            }
+        );
+        assert_eq!(
+            "abc".parse::<Ssrc>().unwrap_err(),
+            AttributeError::ParamNotFound {
+                param: "Ssrc id".to_string(),
+                attr: "ssrc".to_string()
+            }
+        );
+
+        // Test Setup error paths
+        let setup_err = "foo".parse::<Setup>().err().unwrap();
+        assert!(matches!(setup_err, AttributeError::Other { .. }));
+        assert_eq!(format!("{}", setup_err), "setup: Invalid Setup value foo");
+
+        // Test Crypto error paths
+        assert_eq!(
+            "".parse::<Crypto>().unwrap_err(),
+            AttributeError::InvalidParamValue {
+                param: "Tag".to_string(),
+                val: "".to_string(),
+                attr: "crypto".to_string()
+            }
+        );
+        assert_eq!(
+            "abc AES_CM_128_HMAC_SHA1_32 inline:key"
+                .parse::<Crypto>()
+                .unwrap_err(),
+            AttributeError::InvalidParamValue {
+                param: "Tag".to_string(),
+                val: "abc".to_string(),
+                attr: "crypto".to_string()
+            }
+        );
+
+        // Test RtcpFb error paths
+        assert_eq!(
+            "".parse::<RtcpFb>().unwrap_err(),
+            AttributeError::InvalidParamValue {
+                param: "Payload format".to_string(),
+                val: "".to_string(),
+                attr: "rtcp-fb".to_string()
+            }
+        );
+        assert_eq!(
+            "*".parse::<RtcpFb>().unwrap_err(),
+            AttributeError::ParamNotFound {
+                param: "Rtcp feedback value".to_string(),
+                attr: "rtcp-fb".to_string()
+            }
+        );
+        assert_eq!(
+            "1 ack ccfb".parse::<RtcpFb>().unwrap_err(),
+            AttributeError::InvalidParamValue {
+                param: "Payload type".to_string(),
+                val: "1(expected wildcard (*))".to_string(),
+                attr: "rtcp-fb".to_string()
+            }
+        );
+
+        // Test attribute_typed with missing value
+        let media = Media {
+            media: "video".into(),
+            port: 1234,
+            num_ports: None,
+            proto: "RTP/SAVPF".into(),
+            fmt: "".into(),
+            media_title: None,
+            connections: vec![],
+            bandwidths: vec![],
+            key: None,
+            attributes: vec![Attribute {
+                attribute: "rtpmap".into(),
+                value: None,
+            }],
+        };
+        assert_eq!(
+            media
+                .attributes_typed::<RtpMap>()
+                .collect::<Vec<Result<RtpMap, AttributeError>>>()
+                .remove(0)
+                .unwrap_err(),
+            AttributeError::Other {
+                error: "No value for the attribute".to_string(),
+                attr: "rtpmap".to_string()
+            }
         );
     }
 }
