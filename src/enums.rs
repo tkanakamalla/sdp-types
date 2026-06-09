@@ -4,7 +4,10 @@
 
 //! Contains all the helper enums used by a Session, Media and other Attribute structs
 
-use std::{fmt::Display, str::FromStr};
+use std::{
+    fmt::{Display, Write},
+    str::FromStr,
+};
 
 use crate::attributes::SrtpKeyParam;
 
@@ -59,12 +62,16 @@ impl FromStr for NetType {
     type Err = ParseEnumError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_ascii_uppercase().as_str() {
-            "IN" => Ok(NetType::In),
-            "TN" => Ok(NetType::Tn),
-            "ATM" => Ok(NetType::Atm),
-            "PSTN" => Ok(NetType::Pstn),
-            _ => Err(ParseEnumError::Invalid(s.to_string())),
+        if "IN".eq_ignore_ascii_case(s) {
+            Ok(NetType::In)
+        } else if "TN".eq_ignore_ascii_case(s) {
+            Ok(NetType::Tn)
+        } else if "ATM".eq_ignore_ascii_case(s) {
+            Ok(NetType::Atm)
+        } else if "PSTN".eq_ignore_ascii_case(s) {
+            Ok(NetType::Pstn)
+        } else {
+            Err(ParseEnumError::Invalid(s.to_string()))
         }
     }
 }
@@ -101,10 +108,12 @@ impl FromStr for AddrType {
     type Err = ParseEnumError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_ascii_uppercase().as_str() {
-            "IP4" => Ok(AddrType::Ip4),
-            "IP6" => Ok(AddrType::Ip6),
-            _ => Err(ParseEnumError::Invalid(s.to_string())),
+        if "IP4".eq_ignore_ascii_case(s) {
+            Ok(AddrType::Ip4)
+        } else if "IP6".eq_ignore_ascii_case(s) {
+            Ok(AddrType::Ip6)
+        } else {
+            Err(ParseEnumError::Invalid(s.to_string()))
         }
     }
 }
@@ -145,12 +154,16 @@ impl FromStr for BandwidthType {
     type Err = ParseEnumError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_ascii_uppercase().as_str() {
-            "AS" => Ok(BandwidthType::As),
-            "CT" => Ok(BandwidthType::Ct),
-            "RR" => Ok(BandwidthType::Rr),
-            "RS" => Ok(BandwidthType::Rs),
-            _ => Err(ParseEnumError::Invalid(s.to_string())),
+        if "AS".eq_ignore_ascii_case(s) {
+            Ok(BandwidthType::As)
+        } else if "CT".eq_ignore_ascii_case(s) {
+            Ok(BandwidthType::Ct)
+        } else if "RR".eq_ignore_ascii_case(s) {
+            Ok(BandwidthType::Rr)
+        } else if "RS".eq_ignore_ascii_case(s) {
+            Ok(BandwidthType::Rs)
+        } else {
+            Err(ParseEnumError::Invalid(s.to_string()))
         }
     }
 }
@@ -245,14 +258,20 @@ impl FromStr for MediaType {
     type Err = ParseEnumError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_ascii_lowercase().as_str() {
-            "audio" => Ok(MediaType::Audio),
-            "video" => Ok(MediaType::Video),
-            "text" => Ok(MediaType::Text),
-            "application" => Ok(MediaType::Application),
-            "message" => Ok(MediaType::Message),
-            "image" => Ok(MediaType::Image),
-            _ => Err(ParseEnumError::Invalid(s.to_string())),
+        if "audio".eq_ignore_ascii_case(s) {
+            Ok(MediaType::Audio)
+        } else if "video".eq_ignore_ascii_case(s) {
+            Ok(MediaType::Video)
+        } else if "text".eq_ignore_ascii_case(s) {
+            Ok(MediaType::Text)
+        } else if "application".eq_ignore_ascii_case(s) {
+            Ok(MediaType::Application)
+        } else if "message".eq_ignore_ascii_case(s) {
+            Ok(MediaType::Message)
+        } else if "image".eq_ignore_ascii_case(s) {
+            Ok(MediaType::Image)
+        } else {
+            Err(ParseEnumError::Invalid(s.to_string()))
         }
     }
 }
@@ -518,77 +537,80 @@ pub enum RtcpFbVal {
 
 impl Display for RtcpFbVal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let fb_val = match self {
+        match self {
             RtcpFbVal::Ack(ack) => {
-                let mut s = "ack".to_string();
+                write!(f, "ack")?;
                 if let Some(ack) = ack {
                     match ack {
-                        RtcpFbAck::Rpsi => s += " rpsi",
-                        RtcpFbAck::Ccfb => s += " ccfb",
+                        RtcpFbAck::Rpsi => write!(f, " rpsi")?,
+                        RtcpFbAck::Ccfb => write!(f, " ccfb")?,
                         RtcpFbAck::App(app) => {
-                            s += " app";
+                            write!(f, " app")?;
                             if let Some(app_param) = app {
-                                s += format!(" {}", app_param).as_str();
+                                f.write_char(' ')?;
+                                f.write_str(app_param)?;
                             }
                         }
                         RtcpFbAck::Other(other) => {
-                            s += format!(" {}", other).as_str();
+                            f.write_char(' ')?;
+                            f.write_str(other)?;
                         }
                     }
                 }
-                s
+                Ok(())
             }
             RtcpFbVal::Nack(nack) => {
-                let mut s = "nack".to_string();
+                write!(f, "nack")?;
                 if let Some(nack) = nack {
                     match nack {
-                        RtcpFbNack::Pli => s += " pli",
-                        RtcpFbNack::Sli => s += " sli",
-                        RtcpFbNack::Rpsi => s += " rpsi",
-                        RtcpFbNack::Ecn => s += " ecn",
+                        RtcpFbNack::Pli => write!(f, " pli")?,
+                        RtcpFbNack::Sli => write!(f, " sli")?,
+                        RtcpFbNack::Rpsi => write!(f, " rpsi")?,
+                        RtcpFbNack::Ecn => write!(f, " ecn")?,
                         RtcpFbNack::App(app) => {
-                            s += " app";
+                            write!(f, " app")?;
                             if let Some(app_param) = app {
-                                s += format!(" {}", app_param).as_str();
+                                f.write_char(' ')?;
+                                f.write_str(app_param)?;
                             }
                         }
                         RtcpFbNack::Other(other) => {
-                            s += format!(" {}", other).as_str();
+                            f.write_char(' ')?;
+                            f.write_str(other)?;
                         }
                     }
                 }
-                s
+                Ok(())
             }
-            RtcpFbVal::TrrInt(trr_int) => {
-                format!("trr-int {}", trr_int)
-            }
+            RtcpFbVal::TrrInt(trr_int) => write!(f, "trr-int {trr_int}"),
             RtcpFbVal::Ccm(ccm) => {
-                let mut s = "ccm".to_string();
+                write!(f, "ccm")?;
                 match ccm {
-                    RtcpFbCcm::Fir => s += " fir",
-                    RtcpFbCcm::Tstr => s += " tstr",
+                    RtcpFbCcm::Fir => write!(f, " fir")?,
+                    RtcpFbCcm::Tstr => write!(f, " tstr")?,
                     RtcpFbCcm::Tmmbr(smaxpr) => {
-                        s += " tmmbr";
+                        write!(f, " tmmbr")?;
                         if let Some(smaxpr) = smaxpr {
-                            s += format!(" {}", smaxpr).as_str();
+                            f.write_char(' ')?;
+                            f.write_str(smaxpr)?;
                         }
                     }
                     RtcpFbCcm::Vbcm(vbcm) => {
-                        s += " vbcm";
-                        vbcm.iter().for_each(|v| {
-                            s += format!(" {}", v).as_str();
-                        });
+                        write!(f, " vbcm")?;
+                        for v in vbcm {
+                            f.write_char(' ')?;
+                            write!(f, "{v}")?;
+                        }
                     }
                     RtcpFbCcm::Other(other) => {
-                        s += format!(" {}", other).as_str();
+                        f.write_char(' ')?;
+                        f.write_str(other)?;
                     }
                 }
-                s
+                Ok(())
             }
-            RtcpFbVal::Other(other) => other.clone(),
-        };
-
-        f.write_str(&fb_val)
+            RtcpFbVal::Other(other) => f.write_str(other),
+        }
     }
 }
 

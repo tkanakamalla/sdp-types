@@ -4,7 +4,11 @@
 
 //! Contains all the Session description Attributes defined as Structs/Enums
 
-use std::{fmt::Display, net::IpAddr, str::FromStr};
+use std::{
+    fmt::{Display, Write},
+    net::IpAddr,
+    str::FromStr,
+};
 
 use crate::enums::*;
 
@@ -121,14 +125,16 @@ impl FromStr for RtpMap {
 
 impl Display for RtpMap {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut s = format!(
+        write!(
+            f,
             "{} {}/{}",
             self.payload_type, self.encoding_name, self.clock_rate
-        );
+        )?;
         if let Some(params) = &self.encoding_params {
-            s += format!("/{params}").as_str();
+            f.write_char('/')?;
+            f.write_str(params)?;
         }
-        f.write_str(&s)
+        Ok(())
     }
 }
 
@@ -199,16 +205,19 @@ impl FromStr for Fmtp {
 
 impl Display for Fmtp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut s = format!("{} ", self.fmt);
-        for p in &self.format_specific_params {
-            s += p.param.as_str();
+        write!(f, "{} ", self.fmt)?;
+        let mut iter = self.format_specific_params.iter().peekable();
+        while let Some(p) = iter.next() {
+            write!(f, "{}", p.param)?;
             if let Some(val) = &p.val {
-                s += format!("={val}").as_str();
+                f.write_char('=')?;
+                f.write_str(val.as_str())?;
             }
-            s += ";";
+            if iter.peek().is_some() {
+                f.write_char(';')?;
+            }
         }
-        let s = s.trim_end_matches(';').to_string();
-        f.write_str(&s)
+        Ok(())
     }
 }
 
@@ -317,11 +326,11 @@ impl FromStr for Rtcp {
 
 impl Display for Rtcp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let s = format!(
+        write!(
+            f,
             "{} {} {} {}",
             self.port, self.nettype, self.addrtype, self.connection_address
-        );
-        f.write_str(&s)
+        )
     }
 }
 
@@ -490,9 +499,11 @@ impl FromStr for RtcpFb {
 impl Display for RtcpFb {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.pt {
-            RtcpFbPt::Wildcard => write!(f, "* ")?,
-            RtcpFbPt::Fmt(pt) => write!(f, "{pt} ")?,
+            RtcpFbPt::Wildcard => f.write_char('*')?,
+            RtcpFbPt::Fmt(pt) => write!(f, "{pt}")?,
         }
+
+        f.write_char(' ')?;
         write!(f, "{}", self.val)
     }
 }
@@ -527,19 +538,23 @@ impl FromStr for Direction {
     type Err = ParseEnumError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_ascii_lowercase().as_str() {
-            "sendonly" => Ok(Direction::SendOnly),
-            "recvonly" => Ok(Direction::RecvOnly),
-            "sendrecv" => Ok(Direction::SendRecv),
-            "inactive" => Ok(Direction::Inactive),
-            _ => Err(ParseEnumError::Invalid(s.to_string())),
+        if "sendonly".eq_ignore_ascii_case(s) {
+            Ok(Direction::SendOnly)
+        } else if "recvonly".eq_ignore_ascii_case(s) {
+            Ok(Direction::RecvOnly)
+        } else if "sendrecv".eq_ignore_ascii_case(s) {
+            Ok(Direction::SendRecv)
+        } else if "inactive".eq_ignore_ascii_case(s) {
+            Ok(Direction::Inactive)
+        } else {
+            Err(ParseEnumError::Invalid(s.to_string()))
         }
     }
 }
 
 impl Display for Direction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.as_str())
+        f.write_str(self.as_str())
     }
 }
 
@@ -621,17 +636,20 @@ impl FromStr for ExtMap {
 
 impl Display for ExtMap {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut s = self.id.to_string();
+        write!(f, "{}", self.id)?;
         if let Some(direction) = &self.direction {
-            s += format!("/{}", direction.as_str()).as_str();
+            f.write_char('/')?;
+            f.write_str(direction.as_str())?;
         }
 
-        s += format!(" {}", self.uri).as_str();
+        f.write_char(' ')?;
+        f.write_str(&self.uri)?;
+
         if let Some(attr) = &self.attributes {
-            s += format!(" {}", attr).as_str();
+            f.write_char(' ')?;
+            f.write_str(attr.as_str())?;
         }
-
-        f.write_str(&s)
+        Ok(())
     }
 }
 
@@ -710,30 +728,28 @@ impl FromStr for Fingerprint {
 
 impl Display for Fingerprint {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut s = match &self.hash_func {
-            HashFunc::SHA1 => "sha-1".to_string(),
-            HashFunc::SHA224 => "sha-224".to_string(),
-            HashFunc::SHA256 => "sha-256".to_string(),
-            HashFunc::SHA384 => "sha-384".to_string(),
-            HashFunc::SHA512 => "sha-512".to_string(),
-            HashFunc::MD5 => "md-5".to_string(),
-            HashFunc::MD2 => "md-2".to_string(),
-            HashFunc::Other(s) => s.clone(),
+        let hash = match &self.hash_func {
+            HashFunc::SHA1 => "sha-1",
+            HashFunc::SHA224 => "sha-224",
+            HashFunc::SHA256 => "sha-256",
+            HashFunc::SHA384 => "sha-384",
+            HashFunc::SHA512 => "sha-512",
+            HashFunc::MD5 => "md-5",
+            HashFunc::MD2 => "md-2",
+            HashFunc::Other(s) => s.as_str(),
         };
-
+        f.write_str(hash)?;
         let mut first = true;
         for v in &self.fingerprint {
             if first {
-                s += " ";
+                f.write_char(' ')?;
                 first = false;
             } else {
-                s += ":";
+                f.write_char(':')?;
             }
-
-            s += format!("{:X}", v).as_str();
+            write!(f, "{v:02X}")?;
         }
-
-        f.write_str(&s)
+        Ok(())
     }
 }
 
@@ -800,21 +816,21 @@ impl FromStr for Group {
 
 impl Display for Group {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut s = match &self.semantics {
-            GroupSemantics::LS => "LS".to_string(),
-            GroupSemantics::FID => "FS".to_string(),
-            GroupSemantics::SRF => "SRF".to_string(),
-            GroupSemantics::ANAT => "ANAT".to_string(),
-            GroupSemantics::DDP => "DDP".to_string(),
-            GroupSemantics::FEC => "FEC".to_string(),
-            GroupSemantics::Other(s) => s.clone(),
+        let sem = match &self.semantics {
+            GroupSemantics::LS => "LS",
+            GroupSemantics::FID => "FID",
+            GroupSemantics::SRF => "SRF",
+            GroupSemantics::ANAT => "ANAT",
+            GroupSemantics::DDP => "DDP",
+            GroupSemantics::FEC => "FEC",
+            GroupSemantics::Other(s) => s.as_str(),
         };
-
+        f.write_str(sem)?;
         for m in &self.mid_tags {
-            s += format!(" {}", m).as_str();
+            f.write_char(' ')?;
+            f.write_str(m)?;
         }
-
-        f.write_str(&s)
+        Ok(())
     }
 }
 
@@ -929,21 +945,20 @@ impl FromStr for Ssrc {
 
 impl Display for Ssrc {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut s = self.ssrc_id.to_string();
         let attr_str = match &self.attribute {
             SsrcAttribute::Cname => "cname",
             SsrcAttribute::PreviousSsrc => "previous-ssrc",
             SsrcAttribute::Fmtp => "fmtp",
             SsrcAttribute::Other(other) => other.as_str(),
         };
-
-        s += format!(" {}", attr_str).as_str();
+        write!(f, "{} {attr_str}", self.ssrc_id)?;
 
         if let Some(value) = &self.value {
-            s += format!(":{}", value).as_str();
+            f.write_char(':')?;
+            f.write_str(value)?;
         }
 
-        f.write_str(&s)
+        Ok(())
     }
 }
 
@@ -1005,23 +1020,25 @@ impl FromStr for SsrcGroup {
 
 impl Display for SsrcGroup {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut s = match &self.semantics {
-            GroupSemantics::FEC => "FEC".to_string(),
-            GroupSemantics::FID => "FID".to_string(),
+        let sem = match &self.semantics {
+            GroupSemantics::FEC => "FEC",
+            GroupSemantics::FID => "FID",
             // Semantics other than FEC and FID are not useful for source grouping but still displaying
             // them for debugging purpose
-            GroupSemantics::LS => "LS".to_string(),
-            GroupSemantics::SRF => "SRF".to_string(),
-            GroupSemantics::ANAT => "ANAT".to_string(),
-            GroupSemantics::DDP => "DDP".to_string(),
-            GroupSemantics::Other(s) => s.clone(),
+            GroupSemantics::LS => "LS",
+            GroupSemantics::SRF => "SRF",
+            GroupSemantics::ANAT => "ANAT",
+            GroupSemantics::DDP => "DDP",
+            GroupSemantics::Other(s) => s.as_str(),
         };
 
+        f.write_str(sem)?;
         for ssrc_id in &self.ssrc_ids {
-            s += format!(" {}", ssrc_id).as_str();
+            f.write_char(' ')?;
+            write!(f, "{ssrc_id}")?;
         }
 
-        f.write_str(&s)
+        Ok(())
     }
 }
 
@@ -1184,19 +1201,18 @@ impl FromStr for SrtpKeyParam {
 
 impl Display for SrtpKeyParam {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut s = format!("inline:{}", self.key_and_salt);
+        write!(f, "inline:{}", self.key_and_salt)?;
         if let Some(lifetime) = self.lifetime {
             if lifetime.is_power_of_two() {
-                s += format!("|2^{}", lifetime.trailing_zeros()).as_str();
+                write!(f, "|2^{}", lifetime.trailing_zeros())?;
             } else {
-                s += format!("|{}", lifetime).as_str();
+                write!(f, "|{lifetime}")?;
             }
         }
-
         if let Some((mki, length)) = self.mki_and_length {
-            s += format!("|{}:{}", mki, length).as_str()
+            write!(f, "|{mki}:{length}")?;
         }
-        f.write_str(&s)
+        Ok(())
     }
 }
 
@@ -1265,8 +1281,8 @@ impl FromStr for Crypto {
 
         let mut session_params: Vec<SrtpSessionParam> = Vec::new();
         for s in &mut i {
-            let s = s.to_ascii_uppercase();
-            let param = if let Some(kdr_val) = s.strip_prefix("KDR=") {
+            let param = if s.get(..4).map_or(false, |p| p.eq_ignore_ascii_case("KDR=")) {
+                let kdr_val = &s[4..];
                 let Ok(kdr_val) = kdr_val.parse::<u8>() else {
                     return Err(AttributeError::InvalidParamValue {
                         param: "KDR".to_string(),
@@ -1287,13 +1303,17 @@ impl FromStr for Crypto {
                     });
                 }
                 SrtpSessionParam::Kdr(kdr_val)
-            } else if s == "UNENCRYPTED_SRTCP" {
+            } else if s.eq_ignore_ascii_case("UNENCRYPTED_SRTCP") {
                 SrtpSessionParam::UnencryptedSrtcp
-            } else if s == "UNENCRYPTED_SRTP" {
+            } else if s.eq_ignore_ascii_case("UNENCRYPTED_SRTP") {
                 SrtpSessionParam::UnencryptedSrtp
-            } else if s == "UNAUTHENTICATED_SRTP" {
+            } else if s.eq_ignore_ascii_case("UNAUTHENTICATED_SRTP") {
                 SrtpSessionParam::UnauthenticatedSrtp
-            } else if let Some(fec_ord) = s.strip_prefix("FEC_ORDER=") {
+            } else if s
+                .get(..10)
+                .map_or(false, |p| p.eq_ignore_ascii_case("FEC_ORDER="))
+            {
+                let fec_ord = &s[10..];
                 if fec_ord.eq_ignore_ascii_case("FEC_SRTP") {
                     SrtpSessionParam::FecOrder(FecOrder::FecSrtp)
                 } else if fec_ord.eq_ignore_ascii_case("SRTP_FEC") {
@@ -1305,7 +1325,11 @@ impl FromStr for Crypto {
                         attr: <Self as TypedAttribute>::NAME.to_string(),
                     });
                 }
-            } else if let Some(key_params_str) = s.strip_prefix("FEC_KEY=") {
+            } else if s
+                .get(..8)
+                .map_or(false, |p| p.eq_ignore_ascii_case("FEC_KEY="))
+            {
+                let key_params_str = &s[8..];
                 let mut key_params: Vec<SrtpKeyParam> = Vec::new();
 
                 for key_param in key_params_str.split(';') {
@@ -1313,7 +1337,8 @@ impl FromStr for Crypto {
                     key_params.push(key_param);
                 }
                 SrtpSessionParam::FecKey(key_params)
-            } else if let Some(wsh_val) = s.strip_prefix("WSH=") {
+            } else if s.get(..4).map_or(false, |p| p.eq_ignore_ascii_case("WSH=")) {
+                let wsh_val = &s[4..];
                 let Ok(wsh_val) = wsh_val.parse::<u8>() else {
                     return Err(AttributeError::InvalidParamValue {
                         param: "WSH".to_string(),
@@ -1348,8 +1373,6 @@ impl FromStr for Crypto {
 
 impl Display for Crypto {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut s = self.tag.to_string();
-
         let crypto_suite_str = match &self.crypto_suite {
             CryptoSuite::AesCm128HmacSha1_80 => "AES_CM_128_HMAC_SHA1_80",
             CryptoSuite::AesCm128HmacSha1_32 => "AES_CM_128_HMAC_SHA1_32",
@@ -1357,41 +1380,51 @@ impl Display for Crypto {
             CryptoSuite::Other(s) => s.as_str(),
         };
 
-        s += format!(" {}", crypto_suite_str).as_str();
+        write!(f, "{} {crypto_suite_str}", self.tag)?;
 
         for (i, key_param) in self.key_params.iter().enumerate() {
-            s += format!("{}{}", if i == 0 { ' ' } else { ';' }, key_param).as_str();
+            if i == 0 {
+                f.write_char(' ')?;
+            } else {
+                f.write_char(';')?;
+            }
+
+            write!(f, "{}", key_param)?;
         }
 
         for session_param in &self.session_params {
-            let param = match session_param {
-                SrtpSessionParam::Kdr(kdr) => format!(" KDR={kdr}"),
-                SrtpSessionParam::UnencryptedSrtp => " UNENCRYPTED_SRTP".to_string(),
-                SrtpSessionParam::UnencryptedSrtcp => " UNENCRYPTED_SRTCP".to_string(),
-                SrtpSessionParam::UnauthenticatedSrtp => " UNAUTHENTICATED_SRTP".to_string(),
+            match session_param {
+                SrtpSessionParam::Kdr(kdr) => write!(f, " KDR={kdr}")?,
+                SrtpSessionParam::UnencryptedSrtp => write!(f, " UNENCRYPTED_SRTP")?,
+                SrtpSessionParam::UnencryptedSrtcp => write!(f, " UNENCRYPTED_SRTCP")?,
+                SrtpSessionParam::UnauthenticatedSrtp => write!(f, " UNAUTHENTICATED_SRTP")?,
                 SrtpSessionParam::FecOrder(fec_order) => {
                     let order = match fec_order {
                         FecOrder::FecSrtp => "FEC_SRTP",
                         FecOrder::SrtpFec => "SRTP_FEC",
                     };
-                    format!(" FEC_ORDER={order}")
+                    write!(f, " FEC_ORDER={order}")?;
                 }
                 SrtpSessionParam::FecKey(srtp_key_params) => {
-                    let mut fec_keys = " FEC_KEY".to_string();
+                    write!(f, " FEC_KEY")?;
                     for (i, key_param) in srtp_key_params.iter().enumerate() {
-                        fec_keys +=
-                            format!("{}{}", if i == 0 { '=' } else { ';' }, key_param).as_str();
+                        if i == 0 {
+                            f.write_char('=')?;
+                        } else {
+                            f.write_char(';')?;
+                        }
+
+                        write!(f, "{}", key_param)?;
                     }
-                    fec_keys
                 }
-                SrtpSessionParam::Wsh(wsh) => format!(" WSH={wsh}"),
-                SrtpSessionParam::Extension(extn) => format!(" {extn}"),
-            };
-
-            s += param.as_str();
+                SrtpSessionParam::Wsh(wsh) => write!(f, " WSH={wsh}")?,
+                SrtpSessionParam::Extension(extn) => {
+                    f.write_char(' ')?;
+                    f.write_str(extn)?;
+                }
+            }
         }
-
-        f.write_str(&s)
+        Ok(())
     }
 }
 
@@ -1610,18 +1643,19 @@ impl FromStr for Candidate {
 impl Display for Candidate {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let typ = match &self.typ {
-            CandidateType::Host => "host".to_string(),
-            CandidateType::Srflx => "srflx".to_string(),
-            CandidateType::Prflx => "prflx".to_string(),
-            CandidateType::Relay => "relay".to_string(),
-            CandidateType::Other(o) => o.clone(),
+            CandidateType::Host => "host",
+            CandidateType::Srflx => "srflx",
+            CandidateType::Prflx => "prflx",
+            CandidateType::Relay => "relay",
+            CandidateType::Other(o) => o.as_str(),
         };
 
         let candidate_addr = match &self.address {
             CandidateAddress::IpAddr(a) => a.to_string(),
             CandidateAddress::FQDN(d) => d.clone(),
         };
-        let mut s = format!(
+        write!(
+            f,
             "{} {} {} {} {} {} typ {typ}",
             self.foundation,
             self.component_id,
@@ -1629,20 +1663,17 @@ impl Display for Candidate {
             self.priority,
             candidate_addr,
             self.port
-        );
-
+        )?;
         if let Some(rel_addr) = self.rel_addr {
-            s += format!(" raddr {rel_addr}").as_str();
+            write!(f, " raddr {rel_addr}")?;
         }
         if let Some(rel_port) = self.rel_port {
-            s += format!(" rport {rel_port}").as_str();
+            write!(f, " rport {rel_port}")?;
         }
-
         for (key, val) in &self.extensions {
-            s += format!(" {key} {val}").as_str();
+            write!(f, " {key} {val}")?;
         }
-
-        f.write_str(&s)
+        Ok(())
     }
 }
 
