@@ -31,8 +31,8 @@ impl std::fmt::Display for ParseEnumError {
 
 /// Type of network of the originator or a connection of the session.
 ///
-/// See [RFC 8866 Section 5.2](https://tools.ietf.org/html/rfc8866#section-5.2),
-/// [RFC 8866 Section 5.7](https://tools.ietf.org/html/rfc8866#section-5.7) and
+/// See [RFC 8866 Section 5.2](https://datatracker.ietf.org/doc/html/rfc8866#section-5.2),
+/// [RFC 8866 Section 5.7](https://datatracker.ietf.org/doc/html/rfc8866#section-5.7) and
 /// [RFC 8866 Section 8.2.6](https://datatracker.ietf.org/doc/html/rfc8866#section-8.2.6) for more details
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -84,14 +84,14 @@ impl Display for NetType {
 
 /// Type of address of the originator or a connection of the session
 ///
-/// See [RFC 8866 Section 5.2](https://tools.ietf.org/html/rfc8866#section-5.2),
-/// [RFC 8866 Section 5.7](https://tools.ietf.org/html/rfc8866#section-5.7)
+/// See [RFC 8866 Section 5.2](https://datatracker.ietf.org/doc/html/rfc8866#section-5.2),
+/// [RFC 8866 Section 5.7](https://datatracker.ietf.org/doc/html/rfc8866#section-5.7)
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum AddrType {
     /// IPv4 address
     Ip4,
-    /// Ipv6 address
+    /// IPv6 address
     Ip6,
 }
 
@@ -126,16 +126,16 @@ impl Display for AddrType {
 
 /// Type of the Bandwidth value.
 ///
-/// See [RFC 8866 Section 5.8](https://tools.ietf.org/html/rfc8866#section-5.8) for more details.
+/// See [RFC 8866 Section 5.8](https://datatracker.ietf.org/doc/html/rfc8866#section-5.8) for more details.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum BandwidthType {
-    /// Conference total - maximum bandwith a session will use
+    /// Conference total - maximum bandwidth a session will use
     Ct,
     /// Application Specific maximum bandwidth
     As,
-    /// Bandwidth assigned for RTCP reports by active senders. See [RFC 3890 Section 1.1.3](https://datatracker.ietf.org/doc/html/rfc3890#section-1.1.3)
-    Rr,
     /// Bandwidth assigned for RTCP reports by active receivers. See [RFC 3890 Section 1.1.3](https://datatracker.ietf.org/doc/html/rfc3890#section-1.1.3)
+    Rr,
+    /// Bandwidth assigned for RTCP reports by active senders. See [RFC 3890 Section 1.1.3](https://datatracker.ietf.org/doc/html/rfc3890#section-1.1.3)
     Rs,
 }
 
@@ -174,9 +174,9 @@ impl Display for BandwidthType {
     }
 }
 
-/// Method of encryption (Obselete)
+/// Method of encryption (Obsolete)
 ///
-/// Note: This field is obsolete and and MUST NOT be used. It is included in only for legacy reasons
+/// Note: This field is obsolete and MUST NOT be used. It is included only for legacy reasons
 /// See [RFC 8866 Section 5.12](https://datatracker.ietf.org/doc/html/rfc8866#section-5.12)
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum KeyMethod {
@@ -376,7 +376,7 @@ pub enum GroupSemantics {
     FEC,
     /// Decoding Dependency
     ///
-    /// See [RFC 5582 Section 5.2.1](https://datatracker.ietf.org/doc/html/rfc5583#section-5.2.1)
+    /// See [RFC 5583 Section 5.2.1](https://datatracker.ietf.org/doc/html/rfc5583#section-5.2.1)
     DDP,
     /// Other Semantics
     Other(String),
@@ -520,8 +520,8 @@ pub enum RtcpFbCcm {
     Other(String),
 }
 
-#[derive(Debug, PartialEq, Clone)]
 /// Types of RTCP feedback values
+#[derive(Debug, PartialEq, Clone)]
 pub enum RtcpFbVal {
     /// Positive Acknowledgement
     Ack(Option<RtcpFbAck>),
@@ -618,17 +618,17 @@ impl Display for RtcpFbVal {
 ///
 #[derive(Debug, Clone, PartialEq)]
 pub enum SsrcAttribute {
-    /// See [RFC 5576 Section 6.1](https://tools.ietf.org/html/rfc5576#section-6.1)
+    /// See [RFC 5576 Section 6.1](https://datatracker.ietf.org/doc/html/rfc5576#section-6.1)
     Cname,
-    /// See [RFC 5576 Section 6.2](https://tools.ietf.org/html/rfc5576#section-6.2)
+    /// See [RFC 5576 Section 6.2](https://datatracker.ietf.org/doc/html/rfc5576#section-6.2)
     PreviousSsrc,
-    /// See [RFC 5576 Section 6.3](https://tools.ietf.org/html/rfc5576#section-6.3)
+    /// See [RFC 5576 Section 6.3](https://datatracker.ietf.org/doc/html/rfc5576#section-6.3)
     Fmtp,
-    /// See [RFC 5576 Section 6.4](https://tools.ietf.org/html/rfc5576#section-6.4)
+    /// See [RFC 5576 Section 6.4](https://datatracker.ietf.org/doc/html/rfc5576#section-6.4)
     Other(String),
 }
 
-/// Payload format for which feedback messages may be used,
+/// Payload format for which feedback messages may be used
 #[derive(Debug, PartialEq, Clone)]
 pub enum RtcpFbPt {
     /// Fixed payload format

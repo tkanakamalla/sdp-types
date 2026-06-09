@@ -33,7 +33,7 @@ pub enum AttributeError {
         val: String,
         attr: String,
     },
-    /// If an attribute is not in not in expected format
+    /// If an attribute is not in expected format
     #[error("Unsupported attribute format: {} for {}", .val, .attr)]
     UnsupportedFormat { val: String, attr: String },
     /// If there are more than expected items trailing in the attribute parameters
@@ -338,12 +338,12 @@ impl TypedAttribute for Rtcp {
     const NAME: &'static str = "rtcp";
 }
 
-#[derive(Debug, PartialEq, Clone)]
 /// RTCP Feedback Capability
 ///
 /// See [RFC 4585 Section 4.2](https://datatracker.ietf.org/doc/html/rfc4585#section-4.2)
+#[derive(Debug, PartialEq, Clone)]
 pub struct RtcpFb {
-    /// Payload format for which feedback messages may be used,
+    /// Payload format for which feedback messages may be used
     pub pt: RtcpFbPt,
     /// RTCP Feedback value
     pub val: RtcpFbVal,
@@ -397,7 +397,8 @@ impl FromStr for RtcpFb {
                             // See https://datatracker.ietf.org/doc/html/rfc8888#section-6
                             if let RtcpFbPt::Fmt(pt) = pt {
                                 return Err(AttributeError::InvalidParamValue {
-                                    param: "Payload type".to_string(),
+                                    param: "Payload type of Congestion control feedback (ccfb)"
+                                        .to_string(),
                                     val: format!("{pt}(expected wildcard (*))"),
                                     attr: <Self as TypedAttribute>::NAME.to_string(),
                                 });
@@ -437,7 +438,7 @@ impl FromStr for RtcpFb {
                 if let Some(val) = i.next() {
                     let Ok(i) = val.parse::<u64>() else {
                         return Err(AttributeError::InvalidParamValue {
-                            param: "trr-int".to_string(),
+                            param: "Minium interval between RTCP packets (trr-int)".to_string(),
                             val: val.to_string(),
                             attr: <Self as TypedAttribute>::NAME.to_string(),
                         });
@@ -445,7 +446,7 @@ impl FromStr for RtcpFb {
                     RtcpFbVal::TrrInt(i)
                 } else {
                     return Err(AttributeError::Other {
-                        error: "No trr-int value".to_string(),
+                        error: "Minium interval between RTCP packets (trr-int) not specified".to_string(),
                         attr: <Self as TypedAttribute>::NAME.to_string(),
                     });
                 }
@@ -467,7 +468,7 @@ impl FromStr for RtcpFb {
                             for vbcm_val in i {
                                 let Ok(p) = vbcm_val.parse::<u8>() else {
                                     return Err(AttributeError::InvalidParamValue {
-                                        param: "vbcm".to_string(),
+                                        param: "Video backchannel messages (vbcm)".to_string(),
                                         val: vbcm_val.to_string(),
                                         attr: <Self as TypedAttribute>::NAME.to_string(),
                                     });
@@ -481,7 +482,7 @@ impl FromStr for RtcpFb {
                     RtcpFbVal::Ccm(ccm_val)
                 } else {
                     return Err(AttributeError::ParamNotFound {
-                        param: "Ccm param".to_string(),
+                        param: "Codec control messages (ccm)".to_string(),
                         attr: <Self as TypedAttribute>::NAME.to_string(),
                     });
                 }
@@ -514,7 +515,7 @@ impl TypedAttribute for RtcpFb {
 
 /// Media Direction Attributes
 ///
-/// See [RFC 8866 Section 6.7](https://www.rfc-editor.org/rfc/rfc8866.html#section-6.7)
+/// See [RFC 8866 Section 6.7](https://datatracker.ietf.org/doc/html/rfc8866#section-6.7)
 #[derive(Debug, Clone, PartialEq)]
 pub enum Direction {
     SendOnly,
@@ -558,10 +559,10 @@ impl Display for Direction {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
 /// RTP header extensions map
 ///
 /// See [RFC 8285 Section 8](https://datatracker.ietf.org/doc/html/rfc8285#section-8)
+#[derive(Debug, Clone, PartialEq)]
 pub struct ExtMap {
     /// The local identifier (ID) of this extension
     pub id: u8,
@@ -704,7 +705,7 @@ impl FromStr for Fingerprint {
             for f in fp.split(':') {
                 let Ok(mut f) = hex::decode(f) else {
                     return Err(AttributeError::InvalidParamValue {
-                        param: "Hash function".to_string(),
+                        param: "Fingerprint value".to_string(),
                         val: f.to_string(),
                         attr: <Self as TypedAttribute>::NAME.to_string(),
                     });
@@ -840,7 +841,7 @@ impl TypedAttribute for Group {
 
 /// Setup attribute for the session or media.
 ///
-/// See [RFC 4145 Section 4](https://tools.ietf.org/html/rfc4145#section-4) for more details.
+/// See [RFC 4145 Section 4](https://datatracker.ietf.org/doc/html/rfc4145#section-4) for more details.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Setup {
     /// Initiator of the connection.
@@ -892,7 +893,7 @@ impl TypedAttribute for Setup {
 
 /// SSRC media attribute.
 ///
-/// See [RFC 5576 Section 4.1](https://tools.ietf.org/html/rfc5576#section-4.1)
+/// See [RFC 5576 Section 4.1](https://datatracker.ietf.org/doc/html/rfc5576#section-4.1)
 #[derive(Debug, Clone, PartialEq)]
 pub struct Ssrc {
     pub ssrc_id: u32,
@@ -968,7 +969,7 @@ impl TypedAttribute for Ssrc {
 
 /// SSRC group attribute
 ///
-/// See [RFC 5576 Section 4.2](https://tools.ietf.org/doc/html/rfc5576#section-4.2)
+/// See [RFC 5576 Section 4.2](https://datatracker.ietf.org/doc/html/rfc5576#section-4.2)
 #[derive(Debug, Clone, PartialEq)]
 pub struct SsrcGroup {
     pub semantics: GroupSemantics,
@@ -1046,10 +1047,10 @@ impl TypedAttribute for SsrcGroup {
     const NAME: &'static str = "ssrc-group";
 }
 
-#[derive(Debug, PartialEq, Clone)]
 /// SRTP Key parameter
 ///
 /// See [RFC 4568 Section 6.1](https://datatracker.ietf.org/doc/html/rfc4568#section-6.1)
+#[derive(Debug, PartialEq, Clone)]
 pub struct SrtpKeyParam {
     /// Concatenated key and salt, base64 encoded
     pub key_and_salt: String,
@@ -1078,7 +1079,7 @@ impl FromStr for SrtpKeyParam {
             &key_and_salt_with_method[7..]
         } else {
             return Err(AttributeError::InvalidParamValue {
-                param: "Strp Key and Salt".to_string(),
+                param: "Srtp Key and Salt".to_string(),
                 val: key_and_salt_with_method.to_string(),
                 attr: Crypto::NAME.to_string(),
             });
@@ -1218,7 +1219,7 @@ impl Display for SrtpKeyParam {
 
 /// Cryptographic information for the media
 ///
-/// See [RFC 4568 Section 3](https://tools.ietf.org/html/rfc4568#section-4)
+/// See [RFC 4568 Section 4](https://datatracker.ietf.org/doc/html/rfc4568#section-4)
 #[derive(Debug, PartialEq, Clone)]
 pub struct Crypto {
     pub tag: u32,
@@ -2231,7 +2232,7 @@ a=candidate:7 1 UDP 10 192.168.1.1 49157 typ unknown_type\r
         assert_eq!(
             "1 ack ccfb".parse::<RtcpFb>().unwrap_err(),
             AttributeError::InvalidParamValue {
-                param: "Payload type".to_string(),
+                param: "Payload type of Congestion control feedback (ccfb)".to_string(),
                 val: "1(expected wildcard (*))".to_string(),
                 attr: "rtcp-fb".to_string()
             }

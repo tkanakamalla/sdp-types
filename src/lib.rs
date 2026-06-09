@@ -154,7 +154,7 @@ pub struct TimeZone {
 
 /// Encryption key for the session or media.
 ///
-/// Note: This field is obsolete and and MUST NOT be used. It is included in only for legacy reasons
+/// Note: This field is obsolete and MUST NOT be used. It is included only for legacy reasons
 /// See [RFC 8866 Section 5.12](https://tools.ietf.org/html/rfc8866#section-5.12) for more details.
 #[derive(Debug, PartialEq, Eq, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]

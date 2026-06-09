@@ -225,7 +225,7 @@ impl Repeat {
             .and_then(|s| parse_typed_time(s, line.n, "Repeat active-duration"))?;
 
         let offsets = repeat
-            .map(|s| parse_typed_time(s, line.n, "Repeat active-duration"))
+            .map(|s| parse_typed_time(s, line.n, "Repeat offset"))
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(Repeat {
